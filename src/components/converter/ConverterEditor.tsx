@@ -8,7 +8,8 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
-import { ChevronLeft, ArrowRight, Check, Download, Save, RotateCcw, Upload, Folder } from 'lucide-react'
+import { ChevronLeft, ArrowRight, Check, Download, Save, RotateCcw, Upload, Folder, Globe } from 'lucide-react'
+import ConfluenceImporter from './ConfluenceImporter'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { convertToObsidianMD } from '@/services/llmClient'
@@ -33,7 +34,7 @@ function isSupportedFile(name: string): boolean {
   return SUPPORTED_EXTS.some(ext => lower.endsWith(ext))
 }
 
-type InputTab = 'paste' | 'upload' | 'folder'
+type InputTab = 'paste' | 'upload' | 'folder' | 'confluence'
 type Stage = 'input' | 'processing' | 'review'
 type Step2State = 'pending' | 'running' | 'done'
 
@@ -459,9 +460,10 @@ export default function ConverterEditor() {
             {/* Input tabs */}
             <div className="flex gap-1">
               {([
-                { id: 'paste',  label: '붙여넣기' },
-                { id: 'upload', label: '파일 업로드' },
-                { id: 'folder', label: '폴더 일괄' },
+                { id: 'paste',      label: '붙여넣기',    icon: null },
+                { id: 'upload',     label: '파일 업로드', icon: null },
+                { id: 'folder',     label: '폴더 일괄',  icon: <Folder size={11} /> },
+                { id: 'confluence', label: 'Confluence', icon: <Globe size={11} /> },
               ] as const).map(t => (
                 <button
                   key={t.id}
@@ -473,7 +475,7 @@ export default function ConverterEditor() {
                     border: '1px solid var(--color-border)',
                   }}
                 >
-                  {t.id === 'folder' && <Folder size={11} />}
+                  {t.icon}
                   {t.label}
                 </button>
               ))}
@@ -649,7 +651,11 @@ export default function ConverterEditor() {
               </div>
             )}
 
-            {/* ── Metadata form (shared for all tabs) ───────────────────── */}
+            {/* ── Confluence 가져오기 ─────────────────────────────────── */}
+            {inputTab === 'confluence' && <ConfluenceImporter />}
+
+            {/* ── Metadata form (붙여넣기 / 업로드 / 폴더 전용) ─────────── */}
+            {inputTab !== 'confluence' && (<>
             <div className="grid grid-cols-2 gap-3">
               {/* Title — only for single-file modes */}
               {inputTab !== 'folder' && (
@@ -762,6 +768,7 @@ export default function ConverterEditor() {
                 </button>
               )}
             </div>
+            </>)}
           </div>
         )}
 
