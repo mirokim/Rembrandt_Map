@@ -93,7 +93,7 @@ export function parseConfluenceFolder(files: File[]): ConfluencePage[] {
   return pages.sort((a, b) => parseInt(a.id) - parseInt(b.id))
 }
 
-function getAttachmentType(name: string): AttachmentType {
+export function getAttachmentType(name: string): AttachmentType {
   const lower = name.toLowerCase()
   if (lower.endsWith('.pdf')) return 'pdf'
   if (lower.endsWith('.docx') || lower.endsWith('.doc')) return 'docx'
