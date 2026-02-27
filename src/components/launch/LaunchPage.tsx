@@ -108,11 +108,7 @@ export default function LaunchPage({ onComplete }: Props) {
           }}
           data-testid="launch-page"
         >
-          {graphMode === '2d' ? (
-            <Svg2DSequence stage={stage} />
-          ) : (
-            <Svg2DSequence stage={stage} />
-          )}
+          <Svg2DSequence stage={stage} />
         </motion.div>
       )}
     </AnimatePresence>

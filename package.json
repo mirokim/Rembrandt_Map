@@ -1,7 +1,7 @@
 {
   "name": "rembrandt-map",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "AI Director Proxy System — Knowledge Graph UI",
   "type": "module",
   "main": "electron/main.cjs",
