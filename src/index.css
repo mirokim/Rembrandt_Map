@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* ── Theme: Dark (default) ── */
+[data-theme="dark"] {
+  --color-bg-primary: #191919;
+  --color-bg-secondary: #202020;
+  --color-bg-surface: #262626;
+  --color-bg-hover: #2c2c2c;
+  --color-bg-active: #333333;
+  --color-text-primary: #e3e2de;
+  --color-text-secondary: #9b9a97;
+  --color-text-muted: #6b6b60;
+  --color-border: #2f2f2f;
+  --color-border-focus: #529cca;
+  --color-accent: #529cca;
+  --color-bg-overlay: rgba(19, 19, 19, var(--panel-opacity, 0.82));
+}
+
+/* ── Theme: OLED (pure black) ── */
+[data-theme="oled"] {
+  --color-bg-primary: #000000;
+  --color-bg-secondary: #0a0a0a;
+  --color-bg-surface: #141414;
+  --color-bg-hover: #1a1a1a;
+  --color-bg-active: #222222;
+  --color-text-primary: #e3e2de;
+  --color-text-secondary: #9b9a97;
+  --color-text-muted: #5a5a54;
+  --color-border: #1a1a1a;
+  --color-border-focus: #529cca;
+  --color-accent: #529cca;
+  --color-bg-overlay: rgba(0, 0, 0, var(--panel-opacity, 0.82));
+}
+
+/* ── Theme: White (light) ── */
+[data-theme="white"] {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f5f5f5;
+  --color-bg-surface: #eeeeee;
+  --color-bg-hover: #e4e4e4;
+  --color-bg-active: #d8d8d8;
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #555555;
+  --color-text-muted: #888888;
+  --color-border: #e0e0e0;
+  --color-border-focus: #2196f3;
+  --color-accent: #2196f3;
+  --color-bg-overlay: rgba(245, 245, 245, var(--panel-opacity, 0.82));
+}
+
+/* ── Speaker color CSS variables ── */
+:root {
+  --speaker-chief: #9b59b6;
+  --speaker-chief-bg: #2d1b42;
+  --speaker-art: #00bcd4;
+  --speaker-art-bg: #003d45;
+  --speaker-plan: #ff9800;
+  --speaker-plan-bg: #3d2000;
+  --speaker-level: #4caf50;
+  --speaker-level-bg: #0d2e0d;
+  --speaker-prog: #2196f3;
+  --speaker-prog-bg: #0d1f3c;
+}
+
+/* ── Typing indicator pulse animation ── */
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%       { opacity: 1;   transform: scale(1.1); }
+}
+
+/* ── Streaming cursor blink animation ── */
+@keyframes blink {
+  0%, 100% { opacity: 0.8; }
+  50%       { opacity: 0; }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--color-border);
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+}
