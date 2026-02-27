@@ -26,7 +26,7 @@ export const useUIStore = create<UIState>()(
       selectedDocId: null,
       theme: 'dark',
       graphMode: '3d',
-      panelOpacity: 0.82,
+      panelOpacity: 1,
 
       setAppState: (appState) => set({ appState }),
       setCenterTab: (centerTab) => set({ centerTab }),

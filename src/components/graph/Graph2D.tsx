@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
@@ -14,7 +14,7 @@ interface Props {
 const LABEL_Y_OFFSET = 16  // px below node center
 
 export default function Graph2D({ width, height }: Props) {
-  const { nodes, links, selectedNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab } = useUIStore()
 
   // DOM refs — updated imperatively in simulation tick (avoids React re-render per frame)
@@ -34,6 +34,12 @@ export default function Graph2D({ width, height }: Props) {
   const viewRef = useRef({ x: 0, y: 0, scale: 1 })
   const isPanningRef = useRef(false)
   const panStartRef = useRef({ mx: 0, my: 0, tx: 0, ty: 0 })
+
+  // Drag state — which node is being dragged
+  const draggingNodeRef = useRef<string | null>(null)
+
+  // Adjacency map: nodeId → Set<linkIndex> (built from graphStore links)
+  const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
 
   const [tooltip, setTooltip] = useState<{ nodeId: string; x: number; y: number } | null>(null)
 
@@ -71,7 +77,33 @@ export default function Graph2D({ width, height }: Props) {
     })
   }, [])  // stable — reads selectedNodeId via ref, no deps needed
 
-  useGraphSimulation({ width, height, onTick: handleTick })
+  const { simRef, simNodesRef } = useGraphSimulation({ width, height, onTick: handleTick })
+
+  // ── Build adjacency map whenever links change ──────────────────────────────
+  useEffect(() => {
+    const map = new Map<string, Set<number>>()
+    links.forEach((link: GraphLink, i: number) => {
+      const src = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id
+      const tgt = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id
+      if (!map.has(src)) map.set(src, new Set())
+      if (!map.has(tgt)) map.set(tgt, new Set())
+      map.get(src)!.add(i)
+      map.get(tgt)!.add(i)
+    })
+    adjacencyRef.current = map
+  }, [links])
+
+  // ── Helper: client coords → graph (simulation) coords ─────────────────────
+  const clientToGraph = useCallback((clientX: number, clientY: number) => {
+    const el = svgRef.current
+    if (!el) return { x: 0, y: 0 }
+    const rect = el.getBoundingClientRect()
+    const v = viewRef.current
+    return {
+      x: (clientX - rect.left - v.x) / v.scale,
+      y: (clientY - rect.top - v.y) / v.scale,
+    }
+  }, [])
 
   // ── Pan/zoom: wheel zoom ──────────────────────────────────────────────────
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -104,9 +136,20 @@ export default function Graph2D({ width, height }: Props) {
     return () => el.removeEventListener('wheel', handleWheel)
   }, [handleWheel])
 
-  // Release pan on mouse-up outside SVG
+  // ── Global mouseup: release drag or pan even when mouse leaves SVG ─────────
   useEffect(() => {
     const handleGlobalUp = () => {
+      if (draggingNodeRef.current) {
+        const simNode = simNodesRef.current.find(n => n.id === draggingNodeRef.current)
+        if (simNode) {
+          simNode.fx = null
+          simNode.fy = null
+        }
+        simRef.current?.alphaTarget(0)
+        draggingNodeRef.current = null
+        setHoveredNode(null)
+        setTooltip(null)
+      }
       if (isPanningRef.current) {
         isPanningRef.current = false
         if (svgRef.current) svgRef.current.style.cursor = 'grab'
@@ -114,9 +157,9 @@ export default function Graph2D({ width, height }: Props) {
     }
     window.addEventListener('mouseup', handleGlobalUp)
     return () => window.removeEventListener('mouseup', handleGlobalUp)
-  }, [])
+  }, [simNodesRef, simRef, setHoveredNode])
 
-  // ── Pan/zoom: mouse drag ──────────────────────────────────────────────────
+  // ── Pan/zoom: mouse drag (background only) ────────────────────────────────
   const handleSVGMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     // Only pan on background, not on interactive nodes/text
     const target = e.target as Element
@@ -132,6 +175,17 @@ export default function Graph2D({ width, height }: Props) {
   }, [])
 
   const handleSVGMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    // Node drag takes priority over background pan
+    if (draggingNodeRef.current) {
+      const { x, y } = clientToGraph(e.clientX, e.clientY)
+      const simNode = simNodesRef.current.find(n => n.id === draggingNodeRef.current)
+      if (simNode) {
+        simNode.fx = x
+        simNode.fy = y
+        simRef.current?.alphaTarget(0.3).restart()
+      }
+      return
+    }
     if (!isPanningRef.current) return
     const dx = e.clientX - panStartRef.current.mx
     const dy = e.clientY - panStartRef.current.my
@@ -144,12 +198,23 @@ export default function Graph2D({ width, height }: Props) {
       const v = viewRef.current
       graphGroupRef.current.setAttribute('transform', `translate(${v.x},${v.y}) scale(${v.scale})`)
     }
-  }, [])
+  }, [clientToGraph, simNodesRef, simRef])
 
   const handleSVGMouseUp = useCallback(() => {
+    if (draggingNodeRef.current) {
+      const simNode = simNodesRef.current.find(n => n.id === draggingNodeRef.current)
+      if (simNode) {
+        simNode.fx = null
+        simNode.fy = null
+      }
+      simRef.current?.alphaTarget(0)
+      draggingNodeRef.current = null
+      if (svgRef.current) svgRef.current.style.cursor = 'grab'
+      return
+    }
     isPanningRef.current = false
     if (svgRef.current) svgRef.current.style.cursor = 'grab'
-  }, [])
+  }, [simNodesRef, simRef])
 
   // ── Hide labels when an overlay panel is active ───────────────────────────
   useEffect(() => {
@@ -158,7 +223,30 @@ export default function Graph2D({ width, height }: Props) {
   }, [centerTab])
 
   // ── Node event handlers ───────────────────────────────────────────────────
-  const handleNodeClick = useCallback((nodeId: string, docId: string) => {
+
+  // Start dragging: pin node at current mouse position, activate highlight
+  const handleNodeMouseDown = useCallback((nodeId: string, e: React.MouseEvent) => {
+    e.stopPropagation()  // prevent SVG pan from starting
+    draggingNodeRef.current = nodeId
+    const { x, y } = clientToGraph(e.clientX, e.clientY)
+    const simNode = simNodesRef.current.find(n => n.id === nodeId)
+    if (simNode) {
+      simNode.fx = x
+      simNode.fy = y
+      simRef.current?.alphaTarget(0.3).restart()
+    }
+    if (svgRef.current) svgRef.current.style.cursor = 'grabbing'
+    setHoveredNode(nodeId)
+    setTooltip({ nodeId, x: e.clientX, y: e.clientY })
+  }, [clientToGraph, simNodesRef, simRef, setHoveredNode])
+
+  // Single click: just select the node (highlight in graph, no tab switch)
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNode(nodeId)
+  }, [setSelectedNode])
+
+  // Double click: select + open document viewer
+  const handleNodeDoubleClick = useCallback((nodeId: string, docId: string) => {
     setSelectedNode(nodeId)
     setSelectedDoc(docId)
     setCenterTab('document')
@@ -170,6 +258,8 @@ export default function Graph2D({ width, height }: Props) {
   }, [setHoveredNode])
 
   const handleMouseLeave = useCallback(() => {
+    // Don't clear hover while actively dragging this node
+    if (draggingNodeRef.current) return
     setHoveredNode(null)
     setTooltip(null)
   }, [setHoveredNode])
@@ -177,6 +267,76 @@ export default function Graph2D({ width, height }: Props) {
   const handleNodeMouseMove = useCallback((nodeId: string, e: React.MouseEvent) => {
     setTooltip(t => t?.nodeId === nodeId ? { nodeId, x: e.clientX, y: e.clientY } : t)
   }, [])
+
+  // ── Neighbor highlight — useLayoutEffect to avoid flicker before paint ─────
+  useLayoutEffect(() => {
+    const nodeMap = nodeEls.current
+    const labelMap = labelEls.current
+    const linkMap = linkEls.current
+
+    if (!hoveredNodeId) {
+      // Reset all visual overrides
+      nodes.forEach(n => {
+        const el = nodeMap.get(n.id)
+        if (el) { el.style.opacity = ''; el.style.filter = '' }
+        const lEl = labelMap.get(n.id)
+        if (lEl) lEl.style.opacity = ''
+      })
+      links.forEach((_: GraphLink, i: number) => {
+        const el = linkMap.get(i)
+        if (el) { el.style.opacity = ''; el.style.stroke = ''; el.style.strokeWidth = '' }
+      })
+      return
+    }
+
+    // Resolve neighbor link indices and node IDs
+    const neighborLinkIdxs = adjacencyRef.current.get(hoveredNodeId) ?? new Set<number>()
+    const neighborIds = new Set<string>([hoveredNodeId])
+    links.forEach((link: GraphLink, i: number) => {
+      if (neighborLinkIdxs.has(i)) {
+        const src = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id
+        const tgt = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id
+        neighborIds.add(src)
+        neighborIds.add(tgt)
+      }
+    })
+
+    const hovNode = nodes.find(n => n.id === hoveredNodeId)
+    const accentColor = hovNode ? SPEAKER_CONFIG[hovNode.speaker].color : '#ffffff'
+
+    // Dim or highlight each node circle + label
+    nodes.forEach(n => {
+      const el = nodeMap.get(n.id)
+      const lEl = labelMap.get(n.id)
+      if (neighborIds.has(n.id)) {
+        if (el) {
+          el.style.opacity = '1'
+          el.style.filter = n.id === hoveredNodeId
+            ? `drop-shadow(0 0 10px ${accentColor}) drop-shadow(0 0 4px ${accentColor})`
+            : `drop-shadow(0 0 5px ${SPEAKER_CONFIG[n.speaker].color}99)`
+        }
+        if (lEl) lEl.style.opacity = '1'
+      } else {
+        if (el) { el.style.opacity = '0.12'; el.style.filter = '' }
+        if (lEl) lEl.style.opacity = '0.08'
+      }
+    })
+
+    // Highlight connecting wires; dim all others
+    links.forEach((_: GraphLink, i: number) => {
+      const el = linkMap.get(i)
+      if (!el) return
+      if (neighborLinkIdxs.has(i)) {
+        el.style.opacity = '1'
+        el.style.stroke = accentColor
+        el.style.strokeWidth = '2'
+      } else {
+        el.style.opacity = '0.04'
+        el.style.stroke = ''
+        el.style.strokeWidth = ''
+      }
+    })
+  }, [hoveredNodeId, nodes, links])
 
   return (
     <div style={{ position: 'relative', width, height }} data-testid="graph-2d">
@@ -245,11 +405,13 @@ export default function Graph2D({ width, height }: Props) {
                   fill={color}
                   fillOpacity={isSelected ? 1 : 0.82}
                   style={{
-                    cursor: 'pointer',
+                    cursor: 'grab',
                     filter: isSelected ? `drop-shadow(0 0 6px ${color})` : undefined,
                     transition: 'r 0.15s, fill-opacity 0.15s',
                   }}
-                  onClick={() => handleNodeClick(node.id, node.docId)}
+                  onClick={() => handleNodeClick(node.id)}
+                  onDoubleClick={() => handleNodeDoubleClick(node.id, node.docId)}
+                  onMouseDown={e => handleNodeMouseDown(node.id, e)}
                   onMouseEnter={e => handleMouseEnter(node.id, e)}
                   onMouseLeave={handleMouseLeave}
                   onMouseMove={e => handleNodeMouseMove(node.id, e)}

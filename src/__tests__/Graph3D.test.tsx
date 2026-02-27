@@ -77,14 +77,18 @@ vi.mock('three', () => {
       position = new V3()
       aspect = 1
       updateProjectionMatrix() {}
+      getWorldDirection(v: any) { return v }
     },
     Vector3: V3,
     Vector2: class { constructor(public x = 0, public y = 0) {} },
+    Plane: class {
+      setFromNormalAndCoplanarPoint() { return this }
+    },
     BufferGeometry: BufGeo,
     BufferAttribute: BufAttr,
     Mesh,
     SphereGeometry: class { dispose() {} },
-    MeshBasicMaterial: class {},
+    MeshBasicMaterial: class { opacity = 1; transparent = true },
     LineBasicMaterial: class {},
     LineDashedMaterial: class { color = { setHex() {} } },
     PointsMaterial: class { color = { setHex() {} } },
@@ -92,6 +96,12 @@ vi.mock('three', () => {
     Line,
     Points,
     Raycaster: class {
+      ray = {
+        intersectPlane(_plane: any, target: any) {
+          if (target && typeof target.set === 'function') target.set(0, 0, 0)
+          return target
+        },
+      }
       setFromCamera() {}
       intersectObjects() { return _intersectResult }
     },
@@ -111,6 +121,7 @@ vi.mock('three/examples/jsm/controls/OrbitControls.js', () => {
       dampingFactor = 0
       autoRotate = false
       autoRotateSpeed = 0
+      enabled = true
       target = new V3Mock()
       update() {}
       dispose() {}
@@ -144,6 +155,7 @@ vi.mock('d3-force-3d', () => {
     on() { return this },
     stop() {},
     alpha() { return this },
+    alphaTarget() { return this },
     restart() { return this },
   })
   return {
@@ -222,21 +234,29 @@ describe('Graph3D — simulation', () => {
 })
 
 describe('Graph3D — click handling', () => {
-  it('clicking with no raycaster hit does not change selectedNodeId', async () => {
+  it('mousedown with no raycaster hit does not change selectedNodeId', async () => {
     _intersectResult = []
     render(<Graph3D width={800} height={600} />)
     await act(async () => { vi.advanceTimersByTime(50) })
-    fireEvent.click(screen.getByTestId('graph-3d'), { clientX: 400, clientY: 300 })
+    const el = screen.getByTestId('graph-3d')
+    fireEvent.mouseDown(el, { clientX: 400, clientY: 300 })
+    fireEvent.mouseUp(el, { clientX: 400, clientY: 300 })
     expect(useGraphStore.getState().selectedNodeId).toBeNull()
   })
 
-  it('clicking with a raycaster hit sets selectedNodeId and switches to document tab', async () => {
+  it('mousedown+mouseup with a raycaster hit selects the node and switches to document tab', async () => {
     const firstNode = MOCK_NODES[0]
-    _intersectResult = [{ object: { userData: { nodeId: firstNode.id, docId: firstNode.docId } } }]
+    _intersectResult = [{
+      object: { userData: { nodeId: firstNode.id, docId: firstNode.docId } },
+      point: { x: 0, y: 0, z: 0 },
+    }]
 
     render(<Graph3D width={800} height={600} />)
     await act(async () => { vi.advanceTimersByTime(50) })
-    fireEvent.click(screen.getByTestId('graph-3d'), { clientX: 400, clientY: 300 })
+    const el = screen.getByTestId('graph-3d')
+    // mouseDown starts drag, mouseUp with no actual movement → treated as click
+    fireEvent.mouseDown(el, { clientX: 400, clientY: 300 })
+    fireEvent.mouseUp(el, { clientX: 400, clientY: 300 })
 
     expect(useGraphStore.getState().selectedNodeId).toBe(firstNode.id)
     expect(useUIStore.getState().centerTab).toBe('document')

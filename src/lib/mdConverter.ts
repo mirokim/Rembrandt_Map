@@ -99,8 +99,33 @@ export async function extractPdfText(file: File): Promise<string> {
 }
 
 /**
+ * Best-effort text extraction from an HTML file.
+ * Strips all HTML tags via DOMParser, leaving only the visible text content.
+ */
+export async function extractHtmlText(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const html = reader.result as string
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(html, 'text/html')
+        // Remove non-content elements
+        doc.querySelectorAll('script, style, noscript, head').forEach(el => el.remove())
+        const text = (doc.body?.innerText ?? doc.body?.textContent ?? '')
+        resolve(text.replace(/\s+/g, ' ').trim())
+      } catch {
+        reject(new Error('HTML 파일 파싱 실패'))
+      }
+    }
+    reader.onerror = () => reject(new Error('HTML 파일 읽기 실패'))
+    reader.readAsText(file, 'utf-8')
+  })
+}
+
+/**
  * Read a file and return its text content.
- * Supports: .txt, .md (UTF-8 text), .docx (ZIP+XML best-effort), .pdf (best-effort).
+ * Supports: .txt, .md (UTF-8 text), .html/.htm (tag-stripped), .docx (ZIP+XML best-effort), .pdf (best-effort).
  */
 export async function readFileAsText(file: File): Promise<string> {
   const name = file.name.toLowerCase()
@@ -114,8 +139,9 @@ export async function readFileAsText(file: File): Promise<string> {
     })
   }
 
+  if (name.endsWith('.html') || name.endsWith('.htm')) return extractHtmlText(file)
   if (name.endsWith('.docx')) return extractDocxText(file)
   if (name.endsWith('.pdf')) return extractPdfText(file)
 
-  throw new Error('지원하지 않는 파일 형식 (.txt .md .docx .pdf)')
+  throw new Error('지원하지 않는 파일 형식 (.txt .md .html .docx .pdf)')
 }

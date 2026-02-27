@@ -9,7 +9,7 @@ beforeEach(() => {
     selectedDocId: null,
     theme: 'dark',
     graphMode: '3d',
-    panelOpacity: 0.82,
+    panelOpacity: 1,
   })
 })
 
@@ -107,8 +107,8 @@ describe('useUIStore — graphMode', () => {
 })
 
 describe('useUIStore — panelOpacity', () => {
-  it('defaults to 0.82', () => {
-    expect(useUIStore.getState().panelOpacity).toBe(0.82)
+  it('defaults to 1', () => {
+    expect(useUIStore.getState().panelOpacity).toBe(1)
   })
 
   it('setPanelOpacity updates to 0.5', () => {

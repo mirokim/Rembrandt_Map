@@ -83,24 +83,24 @@ describe('Graph2D — node interaction', () => {
     expect(useGraphStore.getState().selectedNodeId).toBe(firstNode.id)
   })
 
-  it('clicking a node sets centerTab to "document"', async () => {
+  it('double-clicking a node sets centerTab to "document"', async () => {
     render(<Graph2D width={800} height={600} />)
     await act(async () => { vi.advanceTimersByTime(200) })
 
     const firstNode = MOCK_NODES[0]
     const circle = screen.getByTestId('graph-nodes').querySelector(`[data-node-id="${firstNode.id}"]`)
-    fireEvent.click(circle!)
+    fireEvent.dblClick(circle!)
 
     expect(useUIStore.getState().centerTab).toBe('document')
   })
 
-  it('clicking a node sets selectedDocId in uiStore', async () => {
+  it('double-clicking a node sets selectedDocId in uiStore', async () => {
     render(<Graph2D width={800} height={600} />)
     await act(async () => { vi.advanceTimersByTime(200) })
 
     const firstNode = MOCK_NODES[0]
     const circle = screen.getByTestId('graph-nodes').querySelector(`[data-node-id="${firstNode.id}"]`)
-    fireEvent.click(circle!)
+    fireEvent.dblClick(circle!)
 
     expect(useUIStore.getState().selectedDocId).toBe(firstNode.docId)
   })

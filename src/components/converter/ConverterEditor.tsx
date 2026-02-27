@@ -2,13 +2,13 @@
  * ConverterEditor — MD 변환 에디터 (중앙 패널 'editor' 탭)
  *
  * 3단계 파이프라인:
- *   Stage 1 — 입력: 텍스트 붙여넣기 또는 파일 업로드 + 메타데이터
+ *   Stage 1 — 입력: 텍스트 붙여넣기 / 파일 업로드 / 폴더 일괄 변환
  *   Stage 2 — AI 처리: Claude가 키워드 추출 + Obsidian 구조 생성 (스트리밍)
  *   Stage 3 — 검토·승인: 편집 가능 textarea + 키워드 칩 + 저장/다운로드
  */
 
-import { useState, useRef } from 'react'
-import { ChevronLeft, ArrowRight, Check, Download, Save, RotateCcw, Upload } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { ChevronLeft, ArrowRight, Check, Download, Save, RotateCcw, Upload, Folder } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { convertToObsidianMD } from '@/services/llmClient'
@@ -27,14 +27,28 @@ const SPEAKERS = [
 
 const DOC_TYPES: ConversionType[] = ['회의록', '보고서', '기획서', '기타']
 
-type Stage = 'input' | 'processing' | 'review'
+const SUPPORTED_EXTS = ['.txt', '.md', '.html', '.htm', '.docx', '.pdf']
+function isSupportedFile(name: string): boolean {
+  const lower = name.toLowerCase()
+  return SUPPORTED_EXTS.some(ext => lower.endsWith(ext))
+}
 
+type InputTab = 'paste' | 'upload' | 'folder'
+type Stage = 'input' | 'processing' | 'review'
 type Step2State = 'pending' | 'running' | 'done'
 
 interface Step2Status {
-  analyze: Step2State   // 문서 분석
-  keywords: Step2State  // 키워드 추출
-  structure: Step2State // MD 구조 생성
+  analyze: Step2State
+  keywords: Step2State
+  structure: Step2State
+}
+
+interface BatchItem {
+  file: File
+  status: 'pending' | 'running' | 'done' | 'error'
+  mdResult?: string
+  keywords?: string[]
+  error?: string
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -49,7 +63,6 @@ function safeName(title: string): string {
     .slice(0, 60)
 }
 
-// Parse KEYWORDS line from Claude output
 function parseKeywords(text: string): string[] {
   const firstLine = text.split('\n')[0] ?? ''
   if (!firstLine.startsWith('KEYWORDS:')) return []
@@ -60,12 +73,25 @@ function parseKeywords(text: string): string[] {
     .filter(Boolean)
 }
 
-// Strip KEYWORDS header line + separator to get the MD body
 function extractMdBody(text: string): string {
-  // Remove leading "KEYWORDS: ..." line and optional blank line + "---" separator
   const withoutKeywords = text.replace(/^KEYWORDS:.*\n?/, '')
   const withoutSep = withoutKeywords.replace(/^\n?---\n/, '')
   return withoutSep.trim()
+}
+
+function fileExt(name: string): string {
+  return name.slice(name.lastIndexOf('.')).toLowerCase()
+}
+
+function downloadMd(mdText: string, basename: string) {
+  const filename = `${safeName(basename)}.md`
+  const blob = new Blob([mdText], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -116,7 +142,6 @@ function StepIndicator({
         )
       })}
 
-      {/* Sub-steps for stage 2 */}
       {stage === 'processing' && (
         <div className="flex items-center gap-3 ml-6">
           {([
@@ -145,11 +170,11 @@ export default function ConverterEditor() {
   const { setCenterTab } = useUIStore()
   const { vaultPath } = useVaultStore()
 
-  // Stage
+  // Stage / tab
   const [stage, setStage] = useState<Stage>('input')
-  const [inputTab, setInputTab] = useState<'paste' | 'upload'>('paste')
+  const [inputTab, setInputTab] = useState<InputTab>('paste')
 
-  // Stage 1 state
+  // Stage 1 — single file state
   const [content, setContent] = useState('')
   const [meta, setMeta] = useState<ConversionMeta>({
     title: '',
@@ -161,19 +186,64 @@ export default function ConverterEditor() {
   const [uploadError, setUploadError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Stage 2 state
+  // Stage 1 — folder batch state
+  const [folderFiles, setFolderFiles] = useState<File[]>([])
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
+  const folderInputRef = useRef<HTMLInputElement>(null)
+
+  // Set webkitdirectory on the folder input (not in JSX type defs)
+  useEffect(() => {
+    folderInputRef.current?.setAttribute('webkitdirectory', '')
+  }, [])
+
+  // Stage 2 — shared streaming state
   const [streamedText, setStreamedText] = useState('')
   const [step2Status, setStep2Status] = useState<Step2Status>({
     analyze: 'pending', keywords: 'pending', structure: 'pending',
   })
   const [processError, setProcessError] = useState('')
 
-  // Stage 3 state
+  // Stage 2 — batch progress
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([])
+  const [batchCurrentIdx, setBatchCurrentIdx] = useState(0)
+
+  // Stage 3 — single file state
   const [keywords, setKeywords] = useState<string[]>([])
   const [finalMd, setFinalMd] = useState('')
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  const isBatchMode = inputTab === 'folder'
+
+  // ── Handlers — folder ──────────────────────────────────────────────────────
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const supported = Array.from(files)
+      .filter(f => isSupportedFile(f.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    setFolderFiles(supported)
+    setSelectedIndices(new Set(supported.map((_, i) => i)))
+  }
+
+  const toggleFile = (idx: number) => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (selectedIndices.size === folderFiles.length) {
+      setSelectedIndices(new Set())
+    } else {
+      setSelectedIndices(new Set(folderFiles.map((_, i) => i)))
+    }
+  }
+
+  // ── Handlers — single file ─────────────────────────────────────────────────
 
   const handleFileSelect = async (file: File) => {
     setUploadError('')
@@ -189,6 +259,40 @@ export default function ConverterEditor() {
     }
   }
 
+  // ── Core conversion helper (used by both single and batch) ─────────────────
+
+  async function runConversion(
+    fileContent: string,
+    fileMeta: ConversionMeta,
+    onStream: (text: string) => void,
+    onStatus: (s: Step2Status) => void,
+  ): Promise<{ mdResult: string; kws: string[] }> {
+    let buffer = ''
+    let kwsParsed = false
+    let firstChunk = true
+
+    await convertToObsidianMD(fileContent, fileMeta, (chunk: string) => {
+      buffer += chunk
+      onStream(buffer)
+      if (firstChunk) {
+        firstChunk = false
+        onStatus({ analyze: 'done', keywords: 'running', structure: 'pending' })
+      }
+      if (!kwsParsed && buffer.includes('\n')) {
+        const kws = parseKeywords(buffer)
+        if (kws.length > 0) {
+          kwsParsed = true
+          onStatus({ analyze: 'done', keywords: 'done', structure: 'running' })
+        }
+      }
+    })
+
+    onStatus({ analyze: 'done', keywords: 'done', structure: 'done' })
+    return { mdResult: extractMdBody(buffer), kws: parseKeywords(buffer) }
+  }
+
+  // ── Handler — single file conversion ──────────────────────────────────────
+
   const handleStartConversion = async () => {
     if (!content.trim()) return
     setStage('processing')
@@ -196,36 +300,15 @@ export default function ConverterEditor() {
     setProcessError('')
     setStep2Status({ analyze: 'running', keywords: 'pending', structure: 'pending' })
 
-    let buffer = ''
-    let keywordsParsed = false
-
-    // Mark analyze as done after first token arrives
-    let firstChunk = true
-
     try {
-      await convertToObsidianMD(content, meta, (chunk: string) => {
-        buffer += chunk
-        setStreamedText(buffer)
-
-        if (firstChunk) {
-          firstChunk = false
-          setStep2Status(s => ({ ...s, analyze: 'done', keywords: 'running' }))
-        }
-
-        // Parse keywords once the first line is complete
-        if (!keywordsParsed && buffer.includes('\n')) {
-          const kws = parseKeywords(buffer)
-          if (kws.length > 0) {
-            setKeywords(kws)
-            keywordsParsed = true
-            setStep2Status(s => ({ ...s, keywords: 'done', structure: 'running' }))
-          }
-        }
-      })
-
-      // Conversion complete
-      setStep2Status({ analyze: 'done', keywords: 'done', structure: 'done' })
-      setFinalMd(extractMdBody(buffer))
+      const { mdResult, kws } = await runConversion(
+        content,
+        meta,
+        text => setStreamedText(text),
+        status => setStep2Status(status),
+      )
+      setKeywords(kws)
+      setFinalMd(mdResult)
       setTimeout(() => setStage('review'), 400)
     } catch (err) {
       setProcessError(err instanceof Error ? err.message : '변환 중 오류 발생')
@@ -233,16 +316,68 @@ export default function ConverterEditor() {
     }
   }
 
-  const handleSaveToVault = async () => {
-    if (!vaultPath) {
-      setSaveStatus('error')
-      return
+  // ── Handler — batch folder conversion ─────────────────────────────────────
+
+  const handleBatchStart = async () => {
+    const selected = folderFiles.filter((_, i) => selectedIndices.has(i))
+    if (selected.length === 0) return
+
+    const items: BatchItem[] = selected.map(file => ({ file, status: 'pending' }))
+    setBatchItems(items)
+    setBatchCurrentIdx(0)
+    setStage('processing')
+    setStreamedText('')
+    setProcessError('')
+
+    const updatedItems = [...items]
+
+    for (let i = 0; i < items.length; i++) {
+      setBatchCurrentIdx(i)
+      updatedItems[i] = { ...updatedItems[i], status: 'running' }
+      setBatchItems([...updatedItems])
+      setStreamedText('')
+      setStep2Status({ analyze: 'running', keywords: 'pending', structure: 'pending' })
+
+      try {
+        const fileContent = await readFileAsText(items[i].file)
+        const title = items[i].file.name.replace(/\.[^.]+$/, '')
+        const fileMeta: ConversionMeta = {
+          title,
+          speaker: meta.speaker,
+          date: meta.date,
+          type: meta.type,
+        }
+
+        const { mdResult, kws } = await runConversion(
+          fileContent,
+          fileMeta,
+          text => setStreamedText(text),
+          status => setStep2Status(status),
+        )
+
+        updatedItems[i] = { ...updatedItems[i], status: 'done', mdResult, keywords: kws }
+        setBatchItems([...updatedItems])
+      } catch (err) {
+        updatedItems[i] = {
+          ...updatedItems[i],
+          status: 'error',
+          error: err instanceof Error ? err.message : '변환 실패',
+        }
+        setBatchItems([...updatedItems])
+      }
     }
+
+    setTimeout(() => setStage('review'), 400)
+  }
+
+  // ── Handlers — save / download ─────────────────────────────────────────────
+
+  const handleSaveToVault = async () => {
+    if (!vaultPath) { setSaveStatus('error'); return }
     setSaveStatus('saving')
     const filename = `${safeName(meta.title)}.md`
-    const fullPath = `${vaultPath}/${filename}`
     try {
-      await window.vaultAPI?.saveFile(fullPath, finalMd)
+      await window.vaultAPI?.saveFile(`${vaultPath}/${filename}`, finalMd)
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2500)
     } catch {
@@ -251,14 +386,17 @@ export default function ConverterEditor() {
   }
 
   const handleDownload = () => {
-    const filename = `${safeName(meta.title)}.md`
-    const blob = new Blob([finalMd], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadMd(finalMd, meta.title)
+  }
+
+  const handleBatchDownloadOne = (item: BatchItem) => {
+    if (item.mdResult) downloadMd(item.mdResult, item.file.name.replace(/\.[^.]+$/, ''))
+  }
+
+  const handleBatchDownloadAll = () => {
+    batchItems
+      .filter(item => item.status === 'done' && item.mdResult)
+      .forEach(item => handleBatchDownloadOne(item))
   }
 
   const handleReset = () => {
@@ -269,15 +407,22 @@ export default function ConverterEditor() {
     setSaveStatus('idle')
     setStep2Status({ analyze: 'pending', keywords: 'pending', structure: 'pending' })
     setProcessError('')
+    setBatchItems([])
+    setBatchCurrentIdx(0)
+    // Keep folderFiles/selectedIndices so user doesn't have to re-pick the folder
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
-  const canStart = content.trim().length > 0
+  const canStartSingle = content.trim().length > 0
+  const canStartBatch = selectedIndices.size > 0
+
+  const batchDoneCount = batchItems.filter(i => i.status === 'done').length
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab bar */}
+
+      {/* ── Tab bar ── */}
       <div
         className="flex items-center shrink-0 gap-1 px-2"
         style={{ height: 34, borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}
@@ -299,35 +444,42 @@ export default function ConverterEditor() {
         </span>
       </div>
 
-      {/* Step indicator */}
+      {/* ── Step indicator ── */}
       <StepIndicator stage={stage} step2Status={step2Status} />
 
-      {/* Content area */}
+      {/* ── Content area ── */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
 
-        {/* ── STAGE 1: 입력 ─────────────────────────────────────────────── */}
+        {/* ════════════════════════════════════════════════════════════════════
+            STAGE 1: 입력
+        ════════════════════════════════════════════════════════════════════ */}
         {stage === 'input' && (
           <div className="flex flex-col gap-4 max-w-2xl mx-auto">
 
             {/* Input tabs */}
             <div className="flex gap-1">
-              {(['paste', 'upload'] as const).map(t => (
+              {([
+                { id: 'paste',  label: '붙여넣기' },
+                { id: 'upload', label: '파일 업로드' },
+                { id: 'folder', label: '폴더 일괄' },
+              ] as const).map(t => (
                 <button
-                  key={t}
-                  onClick={() => setInputTab(t)}
-                  className={cn('px-3 py-1.5 text-xs rounded transition-colors', inputTab === t && 'font-medium')}
+                  key={t.id}
+                  onClick={() => setInputTab(t.id)}
+                  className={cn('px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-1.5', inputTab === t.id && 'font-medium')}
                   style={{
-                    background: inputTab === t ? 'var(--color-bg-hover)' : 'transparent',
-                    color: inputTab === t ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                    background: inputTab === t.id ? 'var(--color-bg-hover)' : 'transparent',
+                    color: inputTab === t.id ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
                     border: '1px solid var(--color-border)',
                   }}
                 >
-                  {t === 'paste' ? '붙여넣기' : '파일 업로드'}
+                  {t.id === 'folder' && <Folder size={11} />}
+                  {t.label}
                 </button>
               ))}
             </div>
 
-            {/* Text input */}
+            {/* ── 붙여넣기 ──────────────────────────────────────────────── */}
             {inputTab === 'paste' && (
               <textarea
                 value={content}
@@ -345,17 +497,13 @@ export default function ConverterEditor() {
               />
             )}
 
-            {/* File upload */}
+            {/* ── 파일 업로드 ───────────────────────────────────────────── */}
             {inputTab === 'upload' && (
               <div
                 className="flex flex-col items-center justify-center gap-3 rounded-lg p-8 cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)]"
                 style={{ border: '1.5px dashed var(--color-border)' }}
                 onClick={() => fileInputRef.current?.click()}
-                onDrop={e => {
-                  e.preventDefault()
-                  const f = e.dataTransfer.files[0]
-                  if (f) handleFileSelect(f)
-                }}
+                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFileSelect(f) }}
                 onDragOver={e => e.preventDefault()}
               >
                 <Upload size={24} style={{ color: 'var(--color-text-muted)' }} />
@@ -364,7 +512,7 @@ export default function ConverterEditor() {
                     파일을 드래그하거나 클릭하여 업로드
                   </div>
                   <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                    .txt .md .docx .pdf
+                    .txt .md .html .docx .pdf
                   </div>
                 </div>
                 {uploadFileName && (
@@ -378,30 +526,159 @@ export default function ConverterEditor() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".txt,.md,.docx,.pdf"
+                  accept=".txt,.md,.html,.htm,.docx,.pdf"
                   className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f) }}
                 />
               </div>
             )}
 
-            {/* Metadata form */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="text-xs mb-1 block" style={{ color: 'var(--color-text-muted)' }}>제목</label>
-                <input
-                  value={meta.title}
-                  onChange={e => setMeta(m => ({ ...m, title: e.target.value }))}
-                  placeholder="문서 제목 (Obsidian 파일명)"
-                  className="w-full px-3 py-1.5 text-sm rounded"
-                  style={{
-                    background: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    border: '1px solid var(--color-border)',
-                    outline: 'none',
+            {/* ── 폴더 일괄 ─────────────────────────────────────────────── */}
+            {inputTab === 'folder' && (
+              <div className="flex flex-col gap-3">
+                {/* Folder picker trigger */}
+                <div
+                  className="flex flex-col items-center justify-center gap-3 rounded-lg p-6 cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)]"
+                  style={{ border: '1.5px dashed var(--color-border)' }}
+                  onClick={() => folderInputRef.current?.click()}
+                  onDrop={e => {
+                    e.preventDefault()
+                    // webkitdirectory doesn't fire drop — just prompt click
+                    folderInputRef.current?.click()
                   }}
-                />
+                  onDragOver={e => e.preventDefault()}
+                >
+                  <Folder size={24} style={{ color: 'var(--color-text-muted)' }} />
+                  <div className="text-center">
+                    <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      폴더를 클릭하여 선택
+                    </div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                      지원 형식: .txt .md .html .docx .pdf
+                    </div>
+                  </div>
+                  {folderFiles.length > 0 && (
+                    <div className="text-xs font-medium" style={{ color: 'var(--color-accent)' }}>
+                      ✓ {folderFiles.length}개 파일 발견
+                    </div>
+                  )}
+                  {/* webkitdirectory set imperatively in useEffect */}
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleFolderSelect}
+                  />
+                </div>
+
+                {/* File list */}
+                {folderFiles.length > 0 && (
+                  <div
+                    className="rounded-lg overflow-hidden"
+                    style={{ border: '1px solid var(--color-border)' }}
+                  >
+                    {/* Header */}
+                    <div
+                      className="flex items-center justify-between px-3 py-2"
+                      style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}
+                    >
+                      <label className="flex items-center gap-2 cursor-pointer text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIndices.size === folderFiles.length}
+                          onChange={toggleAll}
+                          className="cursor-pointer"
+                        />
+                        전체 선택 ({selectedIndices.size}/{folderFiles.length}개 선택됨)
+                      </label>
+                      <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                        변환할 파일 선택
+                      </span>
+                    </div>
+
+                    {/* File rows */}
+                    <div className="max-h-48 overflow-y-auto">
+                      {folderFiles.map((file, idx) => {
+                        const ext = fileExt(file.name)
+                        const isChecked = selectedIndices.has(idx)
+                        return (
+                          <label
+                            key={idx}
+                            className="flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)]"
+                            style={{
+                              borderBottom: idx < folderFiles.length - 1 ? '1px solid var(--color-border)' : undefined,
+                              background: isChecked ? undefined : 'transparent',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleFile(idx)}
+                              className="cursor-pointer shrink-0"
+                            />
+                            {/* Ext badge */}
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0"
+                              style={{
+                                background: 'var(--color-bg-hover)',
+                                color: 'var(--color-accent)',
+                                border: '1px solid var(--color-border)',
+                              }}
+                            >
+                              {ext}
+                            </span>
+                            {/* Filename — show relative path if available */}
+                            <span
+                              className="text-xs truncate"
+                              style={{ color: isChecked ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}
+                              title={file.webkitRelativePath || file.name}
+                            >
+                              {file.webkitRelativePath || file.name}
+                            </span>
+                            {/* Size */}
+                            <span className="text-[10px] shrink-0 ml-auto" style={{ color: 'var(--color-text-muted)' }}>
+                              {(file.size / 1024).toFixed(1)}KB
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* ── Metadata form (shared for all tabs) ───────────────────── */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Title — only for single-file modes */}
+              {inputTab !== 'folder' && (
+                <div className="col-span-2">
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--color-text-muted)' }}>제목</label>
+                  <input
+                    value={meta.title}
+                    onChange={e => setMeta(m => ({ ...m, title: e.target.value }))}
+                    placeholder="문서 제목 (Obsidian 파일명)"
+                    className="w-full px-3 py-1.5 text-sm rounded"
+                    style={{
+                      background: 'var(--color-bg-secondary)',
+                      color: 'var(--color-text-primary)',
+                      border: '1px solid var(--color-border)',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              )}
+              {inputTab === 'folder' && (
+                <div className="col-span-2">
+                  <div
+                    className="text-xs px-3 py-2 rounded"
+                    style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
+                  >
+                    📝 파일명이 각 문서의 제목으로 사용됩니다
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--color-text-muted)' }}>스피커</label>
                 <select
@@ -454,30 +731,104 @@ export default function ConverterEditor() {
               </div>
             </div>
 
-            {/* Start button */}
+            {/* ── Start button ─────────────────────────────────────────── */}
             <div className="flex justify-end">
-              <button
-                onClick={handleStartConversion}
-                disabled={!canStart}
-                className="flex items-center gap-2 px-5 py-2 rounded text-sm font-medium transition-colors disabled:opacity-40"
-                style={{
-                  background: canStart ? 'var(--color-accent)' : 'var(--color-bg-surface)',
-                  color: canStart ? '#fff' : 'var(--color-text-muted)',
-                }}
-              >
-                AI 변환 시작
-                <ArrowRight size={14} />
-              </button>
+              {isBatchMode ? (
+                <button
+                  onClick={handleBatchStart}
+                  disabled={!canStartBatch}
+                  className="flex items-center gap-2 px-5 py-2 rounded text-sm font-medium transition-colors disabled:opacity-40"
+                  style={{
+                    background: canStartBatch ? 'var(--color-accent)' : 'var(--color-bg-surface)',
+                    color: canStartBatch ? '#fff' : 'var(--color-text-muted)',
+                  }}
+                >
+                  <Folder size={14} />
+                  {selectedIndices.size}개 파일 일괄 변환
+                  <ArrowRight size={14} />
+                </button>
+              ) : (
+                <button
+                  onClick={handleStartConversion}
+                  disabled={!canStartSingle}
+                  className="flex items-center gap-2 px-5 py-2 rounded text-sm font-medium transition-colors disabled:opacity-40"
+                  style={{
+                    background: canStartSingle ? 'var(--color-accent)' : 'var(--color-bg-surface)',
+                    color: canStartSingle ? '#fff' : 'var(--color-text-muted)',
+                  }}
+                >
+                  AI 변환 시작
+                  <ArrowRight size={14} />
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* ── STAGE 2: AI 처리 ──────────────────────────────────────────── */}
+        {/* ════════════════════════════════════════════════════════════════════
+            STAGE 2: AI 처리
+        ════════════════════════════════════════════════════════════════════ */}
         {stage === 'processing' && (
           <div className="flex flex-col gap-4 max-w-2xl mx-auto">
-            <div className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              Claude가 문서를 분석하고 있습니다...
-            </div>
+
+            {/* Batch progress header */}
+            {isBatchMode && batchItems.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                    파일 {batchCurrentIdx + 1} / {batchItems.length} 변환 중…
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    {batchItems[batchCurrentIdx]?.file.name}
+                  </div>
+                </div>
+                {/* Progress bar */}
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${((batchCurrentIdx) / batchItems.length) * 100}%`,
+                      background: 'var(--color-accent)',
+                    }}
+                  />
+                </div>
+                {/* File status list */}
+                <div
+                  className="rounded-lg overflow-hidden"
+                  style={{ border: '1px solid var(--color-border)' }}
+                >
+                  {batchItems.map((item, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 px-3 py-1.5 text-xs"
+                      style={{
+                        borderBottom: i < batchItems.length - 1 ? '1px solid var(--color-border)' : undefined,
+                        background: i === batchCurrentIdx ? 'var(--color-bg-hover)' : undefined,
+                        color: item.status === 'done'
+                          ? 'var(--color-accent)'
+                          : item.status === 'error'
+                          ? '#e74c3c'
+                          : item.status === 'running'
+                          ? 'var(--color-text-primary)'
+                          : 'var(--color-text-muted)',
+                      }}
+                    >
+                      <span>
+                        {item.status === 'done' ? '✓' : item.status === 'error' ? '✗' : item.status === 'running' ? '⟳' : '○'}
+                      </span>
+                      <span className="truncate">{item.file.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Single-file processing header */}
+            {!isBatchMode && (
+              <div className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                Claude가 문서를 분석하고 있습니다...
+              </div>
+            )}
 
             {/* Streaming output */}
             <div
@@ -486,8 +837,8 @@ export default function ConverterEditor() {
                 background: 'var(--color-bg-secondary)',
                 border: '1px solid var(--color-border)',
                 color: 'var(--color-text-secondary)',
-                minHeight: 240,
-                maxHeight: 480,
+                minHeight: isBatchMode ? 120 : 240,
+                maxHeight: isBatchMode ? 200 : 480,
                 lineHeight: 1.7,
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
@@ -496,7 +847,6 @@ export default function ConverterEditor() {
               {streamedText || (
                 <span style={{ color: 'var(--color-text-muted)' }}>대기 중...</span>
               )}
-              {/* Blinking cursor */}
               <span
                 style={{
                   display: 'inline-block',
@@ -518,11 +868,7 @@ export default function ConverterEditor() {
                 style={{ background: '#3d1a1a', color: '#e74c3c', border: '1px solid #5a2020' }}
               >
                 오류: {processError}
-                <button
-                  onClick={handleReset}
-                  className="ml-3 underline"
-                  style={{ color: 'var(--color-accent)' }}
-                >
+                <button onClick={handleReset} className="ml-3 underline" style={{ color: 'var(--color-accent)' }}>
                   처음부터 다시
                 </button>
               </div>
@@ -530,108 +876,203 @@ export default function ConverterEditor() {
           </div>
         )}
 
-        {/* ── STAGE 3: 검토·승인 ────────────────────────────────────────── */}
+        {/* ════════════════════════════════════════════════════════════════════
+            STAGE 3: 검토·승인
+        ════════════════════════════════════════════════════════════════════ */}
         {stage === 'review' && (
           <div className="flex flex-col gap-4 max-w-2xl mx-auto">
 
-            {/* Keyword chips */}
-            {keywords.length > 0 && (
-              <div>
-                <div className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                  추출된 키워드
+            {/* ── Batch review ───────────────────────────────────────────── */}
+            {isBatchMode ? (
+              <>
+                {/* Summary */}
+                <div
+                  className="flex items-center justify-between px-4 py-3 rounded-lg"
+                  style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+                >
+                  <div>
+                    <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                      일괄 변환 완료
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                      성공 {batchDoneCount}개 / 전체 {batchItems.length}개
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleBatchDownloadAll}
+                    disabled={batchDoneCount === 0}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-xs rounded font-medium transition-colors disabled:opacity-40"
+                    style={{ background: 'var(--color-accent)', color: '#fff' }}
+                  >
+                    <Download size={12} />
+                    모두 다운로드 ({batchDoneCount}개)
+                  </button>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {keywords.map(kw => (
-                    <span
-                      key={kw}
-                      className="text-xs px-2 py-0.5 rounded-full"
+
+                {/* Per-file results */}
+                <div
+                  className="rounded-lg overflow-hidden"
+                  style={{ border: '1px solid var(--color-border)' }}
+                >
+                  {batchItems.map((item, i) => (
+                    <div
+                      key={i}
+                      className="flex flex-col gap-1.5 px-3 py-2.5"
                       style={{
-                        background: 'var(--color-bg-hover)',
-                        color: 'var(--color-accent)',
-                        border: '1px solid var(--color-accent)',
+                        borderBottom: i < batchItems.length - 1 ? '1px solid var(--color-border)' : undefined,
                       }}
                     >
-                      {kw}
-                    </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-xs font-medium"
+                          style={{
+                            color: item.status === 'done' ? 'var(--color-accent)' : item.status === 'error' ? '#e74c3c' : 'var(--color-text-muted)',
+                          }}
+                        >
+                          {item.status === 'done' ? '✓' : '✗'}
+                        </span>
+                        <span className="text-xs truncate flex-1" style={{ color: 'var(--color-text-primary)' }}>
+                          {item.file.name}
+                        </span>
+                        {item.status === 'done' && (
+                          <button
+                            onClick={() => handleBatchDownloadOne(item)}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors hover:bg-[var(--color-bg-hover)] shrink-0"
+                            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+                          >
+                            <Download size={10} />
+                            .md
+                          </button>
+                        )}
+                      </div>
+                      {item.status === 'error' && (
+                        <div className="text-[10px] pl-4" style={{ color: '#e74c3c' }}>
+                          {item.error}
+                        </div>
+                      )}
+                      {item.status === 'done' && item.keywords && item.keywords.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pl-4">
+                          {item.keywords.slice(0, 4).map(kw => (
+                            <span
+                              key={kw}
+                              className="text-[9px] px-1.5 py-0.5 rounded-full"
+                              style={{ background: 'var(--color-bg-hover)', color: 'var(--color-accent)', border: '1px solid var(--color-accent)' }}
+                            >
+                              {kw}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
-              </div>
-            )}
 
-            {/* Editable MD textarea */}
-            <div>
-              <div className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                생성된 마크다운 (편집 가능)
-              </div>
-              <textarea
-                value={finalMd}
-                onChange={e => setFinalMd(e.target.value)}
-                rows={20}
-                className="w-full resize-none rounded-lg px-3 py-3 text-xs font-mono"
-                style={{
-                  background: 'var(--color-bg-secondary)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border)',
-                  outline: 'none',
-                  lineHeight: 1.7,
-                }}
-                spellCheck={false}
-              />
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors hover:bg-[var(--color-bg-hover)]"
-                style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
-              >
-                <RotateCcw size={12} />
-                다시 편집
-              </button>
-
-              <div className="flex-1" />
-
-              {/* Save to vault */}
-              <button
-                onClick={handleSaveToVault}
-                disabled={!vaultPath || saveStatus === 'saving'}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs rounded font-medium transition-colors disabled:opacity-40"
-                style={{
-                  background: saveStatus === 'saved' ? '#2ecc71' : 'var(--color-accent)',
-                  color: '#fff',
-                }}
-                title={!vaultPath ? '볼트를 먼저 선택하세요 (⚙️ Settings)' : undefined}
-              >
-                {saveStatus === 'saving' ? (
-                  '저장 중...'
-                ) : saveStatus === 'saved' ? (
-                  <><Check size={12} /> 저장됨</>
-                ) : saveStatus === 'error' ? (
-                  '저장 실패'
-                ) : (
-                  <><Save size={12} /> 승인 &amp; 저장</>
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleReset}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors hover:bg-[var(--color-bg-hover)]"
+                    style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
+                  >
+                    <RotateCcw size={12} />
+                    다시 변환
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* ── Single file review ───────────────────────────────────── */
+              <>
+                {/* Keyword chips */}
+                {keywords.length > 0 && (
+                  <div>
+                    <div className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
+                      추출된 키워드
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {keywords.map(kw => (
+                        <span
+                          key={kw}
+                          className="text-xs px-2 py-0.5 rounded-full"
+                          style={{
+                            background: 'var(--color-bg-hover)',
+                            color: 'var(--color-accent)',
+                            border: '1px solid var(--color-accent)',
+                          }}
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </button>
 
-              {/* Download */}
-              <button
-                onClick={handleDownload}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs rounded font-medium transition-colors hover:bg-[var(--color-bg-hover)]"
-                style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-              >
-                <Download size={12} />
-                다운로드 .md
-              </button>
-            </div>
+                {/* Editable MD textarea */}
+                <div>
+                  <div className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
+                    생성된 마크다운 (편집 가능)
+                  </div>
+                  <textarea
+                    value={finalMd}
+                    onChange={e => setFinalMd(e.target.value)}
+                    rows={20}
+                    className="w-full resize-none rounded-lg px-3 py-3 text-xs font-mono"
+                    style={{
+                      background: 'var(--color-bg-secondary)',
+                      color: 'var(--color-text-primary)',
+                      border: '1px solid var(--color-border)',
+                      outline: 'none',
+                      lineHeight: 1.7,
+                    }}
+                    spellCheck={false}
+                  />
+                </div>
 
-            {saveStatus === 'error' && (
-              <div className="text-xs" style={{ color: '#e74c3c' }}>
-                저장 실패 — 볼트를 먼저 선택하세요 (⚙️ Settings → 볼트 선택)
-              </div>
+                {/* Action buttons */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={handleReset}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors hover:bg-[var(--color-bg-hover)]"
+                    style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
+                  >
+                    <RotateCcw size={12} />
+                    다시 편집
+                  </button>
+                  <div className="flex-1" />
+                  <button
+                    onClick={handleSaveToVault}
+                    disabled={!vaultPath || saveStatus === 'saving'}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-xs rounded font-medium transition-colors disabled:opacity-40"
+                    style={{
+                      background: saveStatus === 'saved' ? '#2ecc71' : 'var(--color-accent)',
+                      color: '#fff',
+                    }}
+                    title={!vaultPath ? '볼트를 먼저 선택하세요 (⚙️ Settings)' : undefined}
+                  >
+                    {saveStatus === 'saving' ? '저장 중...'
+                      : saveStatus === 'saved' ? <><Check size={12} /> 저장됨</>
+                      : saveStatus === 'error' ? '저장 실패'
+                      : <><Save size={12} /> 승인 &amp; 저장</>
+                    }
+                  </button>
+                  <button
+                    onClick={handleDownload}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-xs rounded font-medium transition-colors hover:bg-[var(--color-bg-hover)]"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    <Download size={12} />
+                    다운로드 .md
+                  </button>
+                </div>
+
+                {saveStatus === 'error' && (
+                  <div className="text-xs" style={{ color: '#e74c3c' }}>
+                    저장 실패 — 볼트를 먼저 선택하세요 (⚙️ Settings → 볼트 선택)
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
+
       </div>
     </div>
   )
