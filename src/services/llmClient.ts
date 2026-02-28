@@ -191,12 +191,16 @@ export async function fetchRAGContext(
         candidates = response.results ?? []
       } catch {
         // Backend not running — fall through to frontend search
-        candidates = frontendKeywordSearch(userMessage, 8)
       }
-    } else {
-      // ── Fallback: frontend keyword search over loaded vault documents ──
+    }
+
+    // 백엔드 결과가 없으면 프론트엔드 검색으로 보완
+    // (백엔드 미실행, 미인덱싱, 빈 결과 모두 포함)
+    if (candidates.length === 0) {
       candidates = frontendKeywordSearch(userMessage, 8)
     }
+
+    console.log(`[RAG] 검색 후보: ${candidates.length}개 (쿼리: "${userMessage.slice(0, 40)}")`)
 
     // Stage 2: Filter by minimum similarity (완화된 임계값 0.05)
     // 이전 0.15는 너무 엄격하여 제목이 조금만 달라도 누락됨
@@ -210,9 +214,12 @@ export async function fetchRAGContext(
 
     // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
     // queryTerms 전달 → 패시지-레벨 검색으로 각 문서의 가장 관련된 섹션 선택
-    return buildDeepGraphContext(reranked, 3, 20, tokenizeQuery(userMessage))
-  } catch {
+    const ctx = buildDeepGraphContext(reranked, 3, 20, tokenizeQuery(userMessage))
+    console.log(`[RAG] 컨텍스트 생성 완료: ${ctx.length}자`)
+    return ctx
+  } catch (err) {
     // RAG failure is non-fatal — continue without context
+    console.error('[RAG] fetchRAGContext 오류:', err)
     return ''
   }
 }

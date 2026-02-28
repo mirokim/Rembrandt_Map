@@ -16,6 +16,7 @@ const SLIDERS: SliderDef[] = [
   { key: 'charge',      label: 'Repulsion', min: -1000, max: 0,   step: 10   },
   { key: 'linkStrength',label: 'Link',      min: 0,     max: 2,   step: 0.01 },
   { key: 'linkDistance',label: 'Distance',  min: 20,    max: 300, step: 5    },
+  { key: 'linkOpacity', label: 'Wire',      min: 0,     max: 1,   step: 0.01 },
 ]
 
 export default function PhysicsControls() {

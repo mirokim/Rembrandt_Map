@@ -373,33 +373,65 @@ export function rerankResults(
 // ── 3a. Deep graph traversal (BFS) ───────────────────────────────────────────
 
 /**
+ * frontmatter YAML이 제거된 문서 본문 텍스트를 반환합니다.
+ *
+ * 우선순위:
+ *   1. 섹션 조합 (gray-matter가 이미 frontmatter를 제거한 결과물)
+ *   2. rawContent에서 수동으로 frontmatter 제거 (섹션이 모두 비어있을 때)
+ *
+ * rawContent를 그대로 쓰지 않는 이유: rawContent는 YAML frontmatter를 포함하므로
+ * AI가 "---\nspeaker: ...\ntags: ..." 등을 실제 내용으로 오독합니다.
+ */
+function getStrippedBody(doc: LoadedDocument): string {
+  const sectionText = doc.sections
+    .filter(s => s.body.trim())
+    .map(s => {
+      const h = s.heading && s.heading !== '(intro)' ? `### ${s.heading}\n` : ''
+      return h + s.body
+    })
+    .join('\n\n')
+    .trim()
+  if (sectionText) return sectionText
+
+  // 섹션이 모두 비어있는 경우 — rawContent에서 frontmatter 수동 제거
+  const raw = doc.rawContent ?? ''
+  const fmMatch = raw.match(/^---[\s\S]*?---\n?/)
+  return fmMatch ? raw.slice(fmMatch[0].length).trim() : raw.trim()
+}
+
+/**
  * B. 패시지-레벨 콘텐츠 선택.
  *
- * queryTerms가 제공되면 해당 쿼리와 가장 관련된 섹션을 선택합니다.
- * queryTerms가 없으면 rawContent 또는 섹션 전체를 처음부터 반환합니다.
+ * queryTerms가 제공되면 쿼리 토큰과 가장 많이 매칭되는 섹션을 선택합니다.
+ * queryTerms가 없으면 getStrippedBody() 전체를 앞에서부터 반환합니다.
  *
- * 동작 방식: 각 섹션에서 쿼리 토큰 매칭 수를 계산 → 최다 매칭 섹션 선택.
- * 이를 통해 같은 토큰 예산으로 문서의 더 관련된 부분을 담을 수 있습니다.
+ * 모든 경우에서 frontmatter YAML은 제외됩니다.
  */
 function getDocContent(
   doc: LoadedDocument,
   budget: number,
   queryTerms?: string[]
 ): string {
-  // queryTerms 없음 → 기존 방식 (rawContent 앞부분)
+  // queryTerms 없음 → frontmatter 제거된 본문 앞부분
   if (!queryTerms || queryTerms.length === 0) {
-    const raw = doc.rawContent
-      ?? doc.sections.map(s => (s.heading ? `### ${s.heading}\n` : '') + s.body).join('\n\n')
-    return raw.length > budget ? raw.slice(0, budget).trimEnd() + '…' : raw
+    const body = getStrippedBody(doc)
+    return body.length > budget ? body.slice(0, budget).trimEnd() + '…' : body
   }
 
   // 패시지-레벨: 쿼리 토큰과 가장 많이 매칭되는 섹션 선택
+  // intro 섹션 body에는 H1 제목("# 방열 시스템")이 포함되어 파일명이 쿼리와 겹치면
+  // 짧은 intro가 긴 H2 섹션보다 높은 점수를 받는 문제가 있음.
+  // 이를 방지하기 위해 intro 섹션 body에서 선두 마크다운 heading을 제거한 뒤 스코어링.
   let bestSection: DocSection | null = null
   let bestScore = -1
 
   for (const section of doc.sections) {
     if (!section.body.trim()) continue
-    const text = `${section.heading} ${section.body}`.toLowerCase()
+    // intro 섹션 body의 선두 H1 제목 제거 후 스코어링 (파일명 인플레이션 방지)
+    const bodyForScore = section.heading === '(intro)'
+      ? section.body.replace(/^#[^\n]*\n?/, '').trim()
+      : section.body
+    const text = `${section.heading} ${bodyForScore}`.toLowerCase()
     let score = 0
     for (const term of queryTerms) {
       if (text.includes(term)) score++
@@ -410,12 +442,21 @@ function getDocContent(
     }
   }
 
-  if (!bestSection) {
-    const raw = doc.rawContent ?? ''
-    return raw.length > budget ? raw.slice(0, budget).trimEnd() + '…' : raw
+  // 어떤 섹션에도 매칭 없거나, 선택된 섹션이 너무 짧으면 전체 본문 사용
+  const fullBody = getStrippedBody(doc)
+  if (!bestSection || bestScore <= 0) {
+    return fullBody.length > budget ? fullBody.slice(0, budget).trimEnd() + '…' : fullBody
   }
 
-  const passageText = (bestSection.heading ? `### ${bestSection.heading}\n` : '') + bestSection.body
+  const h = bestSection.heading && bestSection.heading !== '(intro)' ? `### ${bestSection.heading}\n` : ''
+  const passageText = h + bestSection.body
+
+  // 선택된 패시지가 너무 짧고 전체 본문이 훨씬 더 많은 내용을 가지고 있으면 전체 본문 사용
+  // (예: 짧은 intro 섹션이 선택됐을 때 실제 내용 섹션들을 날리는 것 방지)
+  if (passageText.length < 200 && fullBody.length > passageText.length * 3) {
+    return fullBody.length > budget ? fullBody.slice(0, budget).trimEnd() + '…' : fullBody
+  }
+
   return passageText.length > budget
     ? passageText.slice(0, budget).trimEnd() + '…'
     : passageText
@@ -464,7 +505,7 @@ function bfsFromDocIds(
 const DEEP_CONTEXT_BUDGET = 16000
 
 /** 홉 거리별 문서당 최대 내용 길이 (chars) */
-const HOP_CHAR_BUDGET = [1200, 600, 280, 120] as const
+const HOP_CHAR_BUDGET = [1500, 900, 500, 250] as const
 
 /**
  * BFS로 그래프를 탐색하여 연결된 문서들의 내용을 수집.
@@ -483,7 +524,29 @@ export function buildDeepGraphContext(
 ): string {
   const { links } = useGraphStore.getState()
   const { loadedDocuments } = useVaultStore.getState()
-  if (!loadedDocuments?.length || !links.length) return ''
+  if (!loadedDocuments?.length) {
+    console.warn('[RAG] loadedDocuments 없음 — 볼트가 로드되지 않았습니다')
+    return ''
+  }
+
+  // WikiLink 없는 볼트 — 그래프 탐색 불가, TF-IDF 결과를 직접 포맷
+  if (!links.length) {
+    if (results.length === 0) return ''
+    const parts: string[] = ['## 관련 문서 (직접 검색)\n']
+    let charCount = 20
+    for (const r of results.slice(0, maxDocs)) {
+      const doc = loadedDocuments.find(d => d.id === r.doc_id)
+      if (!doc) continue
+      const name = doc.filename.replace(/\.md$/i, '')
+      const content = getDocContent(doc, 1200, queryTerms)
+      if (!content) continue
+      const entry = `[문서] ${name}\n${content}\n\n`
+      if (charCount + entry.length > DEEP_CONTEXT_BUDGET) break
+      parts.push(entry)
+      charCount += entry.length
+    }
+    return parts.length <= 1 ? '' : parts.join('') + '\n'
+  }
 
   const { adjacency } = getCachedMaps(links, loadedDocuments)
 
@@ -515,12 +578,13 @@ export function buildDeepGraphContext(
   const hopLabel = ['직접', '1홉', '2홉', '3홉']
   const parts: string[] = [structureHeader, '## 관련 문서 (그래프 탐색)\n']
   let charCount = structureHeader.length + 20
+  let docHits = 0
 
   for (const [docId, hop] of sorted) {
     if (charCount >= DEEP_CONTEXT_BUDGET) break
 
     const doc = loadedDocuments.find(d => d.id === docId)
-    if (!doc) continue
+    if (!doc) continue  // phantom node or ID mismatch — skip
 
     const budget = HOP_CHAR_BUDGET[hop] ?? 80
     const label = hopLabel[hop] ?? `${hop}홉`
@@ -536,9 +600,29 @@ export function buildDeepGraphContext(
 
     parts.push(entry)
     charCount += entry.length
+    docHits++
   }
 
-  if (parts.length <= 1) return ''
+  console.log(`[RAG] BFS 완료: visited=${visited.size}, 콘텐츠 포함=${docHits}개, 총 ${charCount}자`)
+
+  // 실제 문서 콘텐츠가 하나도 없으면 TF-IDF 결과 직접 포맷으로 폴백
+  if (docHits === 0) {
+    if (results.length === 0) return ''
+    const fallback: string[] = ['## 관련 문서 (직접 검색)\n']
+    let fallbackChars = 20
+    for (const r of results.slice(0, maxDocs)) {
+      const doc = loadedDocuments.find(d => d.id === r.doc_id)
+      if (!doc) continue
+      const content = getDocContent(doc, 1200, queryTerms)
+      if (!content) continue
+      const entry = `[직접] ${doc.filename.replace(/\.md$/i, '')}\n${content}\n\n`
+      if (fallbackChars + entry.length > DEEP_CONTEXT_BUDGET) break
+      fallback.push(entry)
+      fallbackChars += entry.length
+    }
+    return fallback.length <= 1 ? '' : fallback.join('') + '\n'
+  }
+
   return parts.join('') + '\n'
 }
 

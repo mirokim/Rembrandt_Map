@@ -74,6 +74,8 @@ export interface PhysicsParams {
   linkStrength: number
   /** Base link distance in px — range 20–300, default 80 */
   linkDistance: number
+  /** Wire (edge) opacity — range 0.0–1.0, default 0.4 */
+  linkOpacity: number
 }
 
 // ── Attachment types (Feature 4) ──────────────────────────────────────────────

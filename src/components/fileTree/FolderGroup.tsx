@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { ChevronRight, ChevronDown, Folder } from 'lucide-react'
-import type { MockDocument } from '@/types'
+import type { MockDocument, LoadedDocument } from '@/types'
 import FileTreeItem from './FileTreeItem'
 import type { ContextMenuState } from './ContextMenu'
 
@@ -66,7 +66,7 @@ export default function FolderGroup({
       {isOpen && (
         <div>
           {docs.map(doc => (
-            <FileTreeItem key={doc.id} doc={doc} onContextMenu={onContextMenu} />
+            <FileTreeItem key={(doc as LoadedDocument).absolutePath ?? doc.id} doc={doc} onContextMenu={onContextMenu} />
           ))}
         </div>
       )}

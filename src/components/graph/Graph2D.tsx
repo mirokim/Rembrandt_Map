@@ -16,7 +16,7 @@ interface Props {
 const LABEL_Y_OFFSET = 16  // px below node center
 
 export default function Graph2D({ width, height }: Props) {
-  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, physics } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const colorRules = useSettingsStore(s => s.colorRules)
 
@@ -373,7 +373,7 @@ export default function Graph2D({ width, height }: Props) {
                   x2={width / 2} y2={height / 2}
                   stroke="var(--color-border)"
                   strokeWidth={1}
-                  strokeOpacity={0.6}
+                  strokeOpacity={physics.linkOpacity}
                 />
               )
             })}

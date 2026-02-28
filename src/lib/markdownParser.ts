@@ -179,9 +179,22 @@ export function parseMarkdownFile(file: VaultFile): LoadedDocument {
  */
 export function parseVaultFiles(files: VaultFile[]): LoadedDocument[] {
   const results: LoadedDocument[] = []
+  const seenIds = new Set<string>()
   for (const file of files) {
     try {
-      results.push(parseMarkdownFile(file))
+      const doc = parseMarkdownFile(file)
+      if (seenIds.has(doc.id)) {
+        // ID 충돌 시 숫자 접미사를 붙여 유일성 보장
+        let n = 2
+        while (seenIds.has(`${doc.id}_${n}`)) n++
+        const newId = `${doc.id}_${n}`
+        console.warn(`[markdownParser] ID 충돌: "${doc.id}" (${file.relativePath}) → "${newId}"`)
+        results.push({ ...doc, id: newId })
+        seenIds.add(newId)
+      } else {
+        seenIds.add(doc.id)
+        results.push(doc)
+      }
     } catch (err) {
       console.warn(`[markdownParser] Failed to parse ${file.relativePath}:`, err)
     }

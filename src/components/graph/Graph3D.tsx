@@ -59,7 +59,7 @@ export default function Graph3D({ width, height }: Props) {
   // Adjacency map: nodeId → Set<linkIndex>
   const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
 
-  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks } = useGraphStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks, physics } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
   const colorRules = useSettingsStore(s => s.colorRules)
@@ -238,7 +238,7 @@ export default function Graph3D({ width, height }: Props) {
     lineColorAttrRef.current = colorAttr
     lineGeoRef.current = lineGeo
 
-    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7 })
+    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: physics.linkOpacity })
     lineMatRef.current = lineMat
     const lineSegments = new THREE.LineSegments(lineGeo, lineMat)
     lineSegments.frustumCulled = false  // edges span the whole scene — never cull
@@ -383,6 +383,14 @@ export default function Graph3D({ width, height }: Props) {
       }
     }
   }, [selectedNodeId, nodes])
+
+  // ── Wire opacity 실시간 반영 ─────────────────────────────────────────────
+  useEffect(() => {
+    if (lineMatRef.current) {
+      lineMatRef.current.opacity = physics.linkOpacity
+      lineMatRef.current.needsUpdate = true
+    }
+  }, [physics.linkOpacity])
 
   // ── CSS2DRenderer labels: hide when overlay panel is active ──────────────
   useEffect(() => {

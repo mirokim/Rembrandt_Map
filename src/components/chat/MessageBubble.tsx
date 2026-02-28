@@ -105,11 +105,13 @@ export default function MessageBubble({ message }: Props) {
 
       {/* Message content */}
       <div
-        className="flex-1 rounded-lg px-3 py-2 text-sm leading-relaxed prose-vault prose-chat"
+        className="flex-1 min-w-0 rounded-lg px-3 py-2 text-sm leading-relaxed prose-vault prose-chat"
         style={{
           background: `${speakerMeta.color}1a`, // 10% opacity
           color: 'var(--color-text-primary)',
           border: `1px solid ${speakerMeta.color}33`, // 20% opacity
+          overflowWrap: 'break-word',
+          wordBreak: 'break-word',
         }}
       >
         {message.streaming && message.content === '' ? (

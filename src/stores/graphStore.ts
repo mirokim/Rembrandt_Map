@@ -7,6 +7,7 @@ const DEFAULT_PHYSICS: PhysicsParams = {
   charge: -80,
   linkStrength: 0.7,
   linkDistance: 60,
+  linkOpacity: 0.4,
 }
 
 const PHYSICS_BOUNDS = {
@@ -14,6 +15,7 @@ const PHYSICS_BOUNDS = {
   charge: { min: -1000, max: 0 },
   linkStrength: { min: 0, max: 2 },
   linkDistance: { min: 20, max: 300 },
+  linkOpacity: { min: 0, max: 1 },
 }
 
 function clampPhysics(params: Partial<PhysicsParams>): Partial<PhysicsParams> {
