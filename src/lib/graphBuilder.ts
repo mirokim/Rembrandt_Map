@@ -76,7 +76,8 @@ export function buildGraphLinks(
     for (const section of doc.sections) {
       for (const rawLink of section.wikiLinks) {
         // Handle [[target|display]] alias syntax and [[target#heading]] anchors
-        const target = rawLink.split('|')[0].split('#')[0].trim()
+        // Also strip trailing path separators: Windows wiki links like [[Note\]] are common
+        const target = rawLink.split('|')[0].split('#')[0].trim().replace(/[/\\]+$/, '').trim()
         if (!target) continue
 
         let targetDocId: string | undefined
@@ -94,6 +95,12 @@ export function buildGraphLinks(
         // Strategy 3: filename match (Obsidian [[note name]] style)
         if (!targetDocId) {
           targetDocId = filenameToDocId.get(target.toLowerCase())
+        }
+
+        // Strategy 3b: subpath wiki link [[Folder/Note]] or [[Folder\Note]] → try basename only
+        if (!targetDocId && (target.includes('/') || target.includes('\\'))) {
+          const basename = target.split(/[/\\]/).pop()?.trim() ?? ''
+          if (basename) targetDocId = filenameToDocId.get(basename.toLowerCase())
         }
 
         // Strategy 4: create phantom node for unresolved wiki links
