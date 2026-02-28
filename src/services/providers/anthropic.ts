@@ -3,7 +3,12 @@ import type { Attachment } from '@/types'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
 const API_VERSION = '2023-06-01'
-const MAX_TOKENS = 1024
+
+function getMaxTokens(model: string): number {
+  if (model.includes('opus')) return 8192
+  if (model.includes('sonnet')) return 8192
+  return 4096 // haiku and others
+}
 
 // ── Content types ──────────────────────────────────────────────────────────────
 
@@ -75,7 +80,7 @@ export async function streamCompletion(
     },
     body: JSON.stringify({
       model,
-      max_tokens: MAX_TOKENS,
+      max_tokens: getMaxTokens(model),
       system: systemPrompt,
       messages: anthropicMessages,
       stream: true,

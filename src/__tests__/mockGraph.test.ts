@@ -44,16 +44,15 @@ describe('MOCK_DOCUMENTS', () => {
 })
 
 describe('buildGraphNodes()', () => {
-  it('creates one node per section', () => {
-    const totalSections = MOCK_DOCUMENTS.reduce((sum, d) => sum + d.sections.length, 0)
-    expect(buildGraphNodes()).toHaveLength(totalSections)
+  it('creates one node per document (20 docs = 20 nodes)', () => {
+    expect(buildGraphNodes()).toHaveLength(20)
   })
 
-  it('node IDs match section IDs', () => {
+  it('node IDs match document IDs', () => {
     const nodes = buildGraphNodes()
-    const sectionIds = new Set(MOCK_DOCUMENTS.flatMap(d => d.sections.map(s => s.id)))
+    const docIds = new Set(MOCK_DOCUMENTS.map(d => d.id))
     for (const node of nodes) {
-      expect(sectionIds.has(node.id)).toBe(true)
+      expect(docIds.has(node.id)).toBe(true)
     }
   })
 
@@ -67,26 +66,21 @@ describe('buildGraphNodes()', () => {
     }
   })
 
-  it('produces at least 40 nodes (20 docs × ≥2 sections)', () => {
-    expect(buildGraphNodes().length).toBeGreaterThanOrEqual(40)
+  it('node labels are filenames without .md', () => {
+    const nodes = buildGraphNodes()
+    for (const node of nodes) {
+      expect(node.label).not.toMatch(/\.md$/i)
+    }
   })
 })
 
 describe('buildGraphLinks()', () => {
-  it('all link sources reference valid node IDs', () => {
+  it('all link sources and targets reference valid node IDs', () => {
     const nodes = buildGraphNodes()
     const links = buildGraphLinks(nodes)
     const nodeIds = new Set(nodes.map(n => n.id))
     for (const link of links) {
       expect(nodeIds.has(link.source as string)).toBe(true)
-    }
-  })
-
-  it('all link targets reference valid node IDs', () => {
-    const nodes = buildGraphNodes()
-    const links = buildGraphLinks(nodes)
-    const nodeIds = new Set(nodes.map(n => n.id))
-    for (const link of links) {
       expect(nodeIds.has(link.target as string)).toBe(true)
     }
   })
@@ -105,6 +99,16 @@ describe('buildGraphLinks()', () => {
   it('has at least 1 link', () => {
     const nodes = buildGraphNodes()
     expect(buildGraphLinks(nodes).length).toBeGreaterThan(0)
+  })
+
+  it('links connect document-level IDs (not section IDs)', () => {
+    const nodes = buildGraphNodes()
+    const links = buildGraphLinks(nodes)
+    const docIds = new Set(MOCK_DOCUMENTS.map(d => d.id))
+    for (const link of links) {
+      expect(docIds.has(link.source as string)).toBe(true)
+      expect(docIds.has(link.target as string)).toBe(true)
+    }
   })
 })
 

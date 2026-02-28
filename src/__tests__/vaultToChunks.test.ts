@@ -10,6 +10,7 @@ const makeDoc = (
 ): LoadedDocument => ({
   id,
   filename: `${id}.md`,
+  folderPath: '',
   speaker: 'art_director',
   date: '2024-01-01',
   tags: ['tag1', 'tag2'],

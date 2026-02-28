@@ -28,7 +28,7 @@ export const SPEAKER_CONFIG: Record<SpeakerId, SpeakerMeta> = {
     role: '비주얼 퀄리티 · 톤앤매너 · 컬러',
   },
   plan_director: {
-    label: 'Plan',
+    label: 'Design',
     color: '#ff9800',
     hex: 0xff9800,
     darkBg: '#3d2000',

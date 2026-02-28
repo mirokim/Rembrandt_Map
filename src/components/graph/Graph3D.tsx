@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useGraphSimulation3D, type SimNode3D, type SimLink3D } from '@/hooks/useGraphSimulation3D'
 import { useFrameRate } from '@/hooks/useFrameRate'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
+import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
 import type { GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -53,13 +54,31 @@ export default function Graph3D({ width, height }: Props) {
   const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
 
   const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
-  const { setSelectedDoc, setCenterTab, centerTab } = useUIStore()
+  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+
+  // Build color lookup map whenever nodes or color mode changes
+  const nodeColorMap = useMemo(
+    () => buildNodeColorMap(nodes, nodeColorMode),
+    [nodes, nodeColorMode]
+  )
   const selectedNodeIdRef = useRef(selectedNodeId)
   selectedNodeIdRef.current = selectedNodeId
 
   const [tooltip, setTooltip] = useState<{ nodeId: string; x: number; y: number } | null>(null)
 
   useFrameRate()
+
+  // ── Update node colors when color mode changes ────────────────────────────
+  useEffect(() => {
+    const meshMap = nodeMeshesRef.current
+    nodes.forEach(node => {
+      const mesh = meshMap.get(node.id)
+      if (mesh) {
+        const mat = mesh.material as THREE.MeshBasicMaterial
+        mat.color.set(getNodeColor(node, nodeColorMode, nodeColorMap))
+      }
+    })
+  }, [nodes, nodeColorMode, nodeColorMap])
 
   // ── Build adjacency map whenever links change ──────────────────────────────
   useEffect(() => {
@@ -101,11 +120,16 @@ export default function Graph3D({ width, height }: Props) {
       }
     }
 
-    // Keep selection ring tracking selected node
+    // Keep selection ring + particles tracking selected node
     const selId = selectedNodeIdRef.current
     if (selId && selRingRef.current) {
       const n = simNodes.find(x => x.id === selId)
-      if (n) selRingRef.current.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0)
+      if (n) {
+        selRingRef.current.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0)
+        if (particlesRef.current) {
+          particlesRef.current.position.set(n.x ?? 0, n.y ?? 0, n.z ?? 0)
+        }
+      }
     }
   }, [])
 
@@ -155,7 +179,7 @@ export default function Graph3D({ width, height }: Props) {
     // ── Nodes ────────────────────────────────────────────────────────────────
     const geo = new THREE.SphereGeometry(NODE_RADIUS, 16, 12)
     nodes.forEach(node => {
-      const color = SPEAKER_CONFIG[node.speaker].hex
+      const color = getNodeColor(node, nodeColorMode, nodeColorMap)
       // transparent: true so we can dim opacity for non-neighbors
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 })
       const mesh = new THREE.Mesh(geo, mat)
@@ -203,7 +227,9 @@ export default function Graph3D({ width, height }: Props) {
 
     const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7 })
     lineMatRef.current = lineMat
-    scene.add(new THREE.LineSegments(lineGeo, lineMat))
+    const lineSegments = new THREE.LineSegments(lineGeo, lineMat)
+    lineSegments.frustumCulled = false  // edges span the whole scene — never cull
+    scene.add(lineSegments)
 
     // ── Selection ring (initially hidden) ─────────────────────────────────────
     const ringPoints: THREE.Vector3[] = []
@@ -262,12 +288,11 @@ export default function Graph3D({ width, height }: Props) {
 
       if (particlesRef.current?.visible && particlePosRef.current && particleOffsets.current) {
         const t = tickRef.current * 0.01
-        const base = selRingRef.current?.position ?? new THREE.Vector3()
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           const drift = Math.sin(t + i) * 0.5
-          pPos[i * 3 + 0] = base.x + offsets[i * 3 + 0] + drift
-          pPos[i * 3 + 1] = base.y + offsets[i * 3 + 1] + drift
-          pPos[i * 3 + 2] = base.z + offsets[i * 3 + 2]
+          pPos[i * 3 + 0] = offsets[i * 3 + 0] + drift
+          pPos[i * 3 + 1] = offsets[i * 3 + 1] + drift
+          pPos[i * 3 + 2] = offsets[i * 3 + 2]
         }
         ;(pGeo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
       }
@@ -566,9 +591,13 @@ export default function Graph3D({ width, height }: Props) {
       if (!wasActualDrag) {
         const mesh = nodeMeshesRef.current.get(draggedNodeId)
         if (mesh) {
+          const docId = mesh.userData.docId as string
           setSelectedNode(draggedNodeId)
-          setSelectedDoc(mesh.userData.docId as string)
-          setCenterTab('document')
+          setSelectedDoc(docId)
+          // Phantom nodes (_phantom_*) have no real file — don't open editor
+          if (!docId.startsWith('_phantom_')) {
+            openInEditor(docId)
+          }
         }
       }
     }
@@ -577,7 +606,7 @@ export default function Graph3D({ width, height }: Props) {
     setHoveredNode(null)
     lastHoveredRef.current = null
     setTooltip(null)
-  }, [simNodesRef, simRef, setSelectedNode, setSelectedDoc, setCenterTab, setHoveredNode])
+  }, [simNodesRef, simRef, setSelectedNode, setSelectedDoc, setCenterTab, setHoveredNode, openInEditor])
 
   // ── Mouse leave: clear hover when cursor leaves the 3D area ──────────────
   const handleMouseLeave = useCallback(() => {

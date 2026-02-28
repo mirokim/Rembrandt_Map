@@ -1,12 +1,20 @@
 import { useState, useRef } from 'react'
-import { Send, Paperclip, X } from 'lucide-react'
+import { Send, Paperclip, Swords, X } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { generateId } from '@/lib/utils'
 import type { Attachment } from '@/types'
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
+
 // ── File → Attachment converter ───────────────────────────────────────────────
 
 async function fileToAttachment(file: File): Promise<Attachment> {
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error(`파일이 너무 큽니다 (${(file.size / 1024 / 1024).toFixed(1)}MB). 최대 10MB까지 가능합니다.`)
+  }
+
   const id = generateId()
   const isImage = file.type.startsWith('image/')
 
@@ -44,9 +52,15 @@ async function fileToAttachment(file: File): Promise<Attachment> {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ChatInput() {
+interface ChatInputProps {
+  debateMode?: boolean
+  onToggleDebate?: () => void
+}
+
+export default function ChatInput({ debateMode, onToggleDebate }: ChatInputProps) {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   const { sendMessage, isLoading } = useChatStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -70,14 +84,20 @@ export default function ChatInput() {
   }
 
   const handleFilesSelected = async (files: FileList) => {
+    setFileError(null)
     const newAttachments: Attachment[] = []
+    const errors: string[] = []
     for (const file of Array.from(files)) {
       try {
         const att = await fileToAttachment(file)
         newAttachments.push(att)
-      } catch {
-        // Silently skip unreadable files
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : `${file.name}: 읽기 실패`)
       }
+    }
+    if (errors.length > 0) {
+      setFileError(errors.join(', '))
+      setTimeout(() => setFileError(null), 5000)
     }
     if (newAttachments.length > 0) {
       setAttachments(prev => [...prev, ...newAttachments])
@@ -137,24 +157,54 @@ export default function ChatInput() {
         </div>
       )}
 
-      {/* Input row */}
-      <div className="flex items-end gap-2">
-        {/* Paperclip — file attachment trigger */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isLoading}
-          className="shrink-0 p-2 rounded-lg transition-colors disabled:opacity-50"
-          style={{
-            background: 'var(--color-bg-surface)',
-            color: 'var(--color-text-muted)',
-            border: '1px solid var(--color-border)',
-          }}
-          title="파일 첨부 (이미지 PNG/JPG/WebP, 텍스트 .txt/.md)"
-          aria-label="파일 첨부"
-          data-testid="chat-attach-button"
+      {/* File error toast */}
+      {fileError && (
+        <div
+          className="text-xs px-2 py-1 rounded"
+          style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)' }}
         >
-          <Paperclip size={14} />
-        </button>
+          {fileError}
+        </div>
+      )}
+
+      {/* Input row */}
+      <div className="flex items-stretch gap-2">
+        {/* Left column: debate toggle + attach */}
+        <div className="shrink-0 flex flex-col gap-1">
+          {/* Debate mode toggle */}
+          {onToggleDebate && (
+            <button
+              onClick={onToggleDebate}
+              className="p-2 rounded-lg transition-colors"
+              style={
+                debateMode
+                  ? { background: 'rgba(82,156,202,0.15)', color: 'var(--color-accent)', border: '1px solid rgba(82,156,202,0.3)' }
+                  : { background: 'var(--color-bg-surface)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }
+              }
+              title={debateMode ? '채팅 모드로 전환' : 'AI 토론 모드로 전환'}
+              data-testid="debate-mode-toggle"
+            >
+              <Swords size={14} />
+            </button>
+          )}
+
+          {/* Paperclip — file attachment trigger */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading}
+            className="p-2 rounded-lg transition-colors disabled:opacity-50"
+            style={{
+              background: 'var(--color-bg-surface)',
+              color: 'var(--color-text-muted)',
+              border: '1px solid var(--color-border)',
+            }}
+            title="파일 첨부 (이미지 PNG/JPG/WebP, 텍스트 .txt/.md)"
+            aria-label="파일 첨부"
+            data-testid="chat-attach-button"
+          >
+            <Paperclip size={14} />
+          </button>
+        </div>
 
         {/* Hidden file input */}
         <input
@@ -181,7 +231,7 @@ export default function ChatInput() {
           onKeyDown={handleKeyDown}
           placeholder="디렉터에게 질문하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
           disabled={isLoading}
-          rows={2}
+          rows={1}
           data-testid="chat-textarea"
           className="flex-1 resize-none rounded-lg px-3 py-2 text-sm"
           style={{

@@ -3,7 +3,7 @@
  *
  * Key differences from OpenAI/Anthropic:
  * - REST endpoint differs per model
- * - API key is a query parameter, not a header
+ * - API key sent via x-goog-api-key header (not URL parameter)
  * - Role names: 'user' stays 'user', 'assistant' becomes 'model'
  * - System prompt is a separate `systemInstruction` field
  * - Streaming uses `alt=sse` query parameter
@@ -63,7 +63,7 @@ export async function streamCompletion(
   onChunk: (chunk: string) => void,
   imageAttachments: Attachment[] = []
 ): Promise<void> {
-  const url = `${BASE_URL}/${model}:streamGenerateContent?alt=sse&key=${apiKey}`
+  const url = `${BASE_URL}/${model}:streamGenerateContent?alt=sse`
 
   const geminiMessages: GeminiMessage[] = messages.map((m, idx) => {
     const isLastUser = m.role === 'user' && idx === messages.length - 1
@@ -77,6 +77,7 @@ export async function streamCompletion(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
       systemInstruction: {

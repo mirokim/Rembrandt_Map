@@ -91,27 +91,37 @@ function collectMarkdownFiles(vaultPath, dirPath, depth) {
   let entries
   try {
     entries = fs.readdirSync(dirPath, { withFileTypes: true })
-  } catch {
+  } catch (err) {
+    console.warn('[vault] readdirSync failed for', dirPath, err.message)
     return []
   }
 
   for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue  // skip hidden
+    if (entry.name.startsWith('.')) continue  // skip hidden (.obsidian, etc.)
     const fullPath = path.join(dirPath, entry.name)
 
-    try {
-      const stat = fs.lstatSync(fullPath)
-      if (stat.isSymbolicLink()) continue  // skip symlinks
-    } catch {
-      continue
-    }
+    // ── Strategy for Synology Drive / cloud-backed virtual filesystems ──
+    // lstatSync can fail for "online-only" or Unicode-named files on virtual
+    // file systems.  Instead of relying on stat, we determine file type by
+    // extension (.md → file) and try readdirSync to detect directories.
 
-    if (entry.isDirectory()) {
-      results.push(...collectMarkdownFiles(vaultPath, fullPath, depth + 1))
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+    // 1) If name ends with .md → collect as markdown file
+    if (entry.name.toLowerCase().endsWith('.md')) {
       if (isInsideVault(vaultPath, fullPath)) {
         results.push(fullPath)
       }
+      continue
+    }
+
+    // 2) Skip obvious non-directory files (have a file extension)
+    if (/\.\w{1,10}$/.test(entry.name)) continue
+
+    // 3) Remaining entries (no extension) — try to recurse as directory.
+    //    readdirSync will throw if it's not a readable directory → caught below.
+    try {
+      results.push(...collectMarkdownFiles(vaultPath, fullPath, depth + 1))
+    } catch {
+      // Not a directory or not readable — skip silently
     }
   }
   return results
@@ -136,18 +146,27 @@ function registerVaultIpcHandlers() {
       throw new Error('Invalid vault path')
     }
     const resolvedVault = path.resolve(vaultPath)
+
+    if (!fs.existsSync(resolvedVault)) {
+      throw new Error(`볼트 경로가 존재하지 않습니다: ${resolvedVault}`)
+    }
+
     const filePaths = collectMarkdownFiles(resolvedVault, resolvedVault)
+    console.log(`[vault] ${filePaths.length}개 .md 파일 발견 (${resolvedVault})`)
 
     const files = []
     for (const absPath of filePaths) {
       try {
         const content = fs.readFileSync(absPath, 'utf-8')
         const relativePath = path.relative(resolvedVault, absPath).replace(/\\/g, '/')
-        files.push({ relativePath, absolutePath: absPath, content })
+        let mtime
+        try { mtime = fs.statSync(absPath).mtimeMs } catch { /* ignore */ }
+        files.push({ relativePath, absolutePath: absPath, content, mtime })
       } catch (err) {
-        console.warn('[vault] Failed to read', absPath, err)
+        console.warn('[vault] Failed to read', absPath, err.message)
       }
     }
+    console.log(`[vault] ${files.length}/${filePaths.length}개 파일 읽기 성공`)
     return files
   })
 
@@ -192,6 +211,27 @@ function registerVaultIpcHandlers() {
     fs.writeFileSync(resolved, content, 'utf-8')
     return { success: true, path: resolved }
   })
+
+  // ── vault:rename-file ─────────────────────────────────────────────────────────
+  ipcMain.handle('vault:rename-file', (_event, absolutePath, newFilename) => {
+    if (!absolutePath || typeof absolutePath !== 'string') throw new Error('Invalid path')
+    if (!newFilename || typeof newFilename !== 'string') throw new Error('Invalid filename')
+    const resolved = path.resolve(absolutePath)
+    if (!fs.existsSync(resolved)) throw new Error(`파일이 존재하지 않습니다: ${resolved}`)
+    const dir = path.dirname(resolved)
+    const newPath = path.join(dir, newFilename)
+    fs.renameSync(resolved, newPath)
+    return { success: true, newPath }
+  })
+
+  // ── vault:delete-file ─────────────────────────────────────────────────────────
+  ipcMain.handle('vault:delete-file', (_event, absolutePath) => {
+    if (!absolutePath || typeof absolutePath !== 'string') throw new Error('Invalid path')
+    const resolved = path.resolve(absolutePath)
+    if (!fs.existsSync(resolved)) throw new Error(`파일이 존재하지 않습니다: ${resolved}`)
+    fs.unlinkSync(resolved)
+    return { success: true }
+  })
 }
 
 function registerBackendIpcHandlers() {
@@ -212,6 +252,9 @@ function registerWindowIpcHandlers() {
     else mainWindow?.maximize()
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
+  ipcMain.handle('window:toggle-devtools', () => {
+    mainWindow?.webContents.toggleDevTools()
+  })
 }
 
 // ── Window creation ────────────────────────────────────────────────────────────
@@ -236,20 +279,37 @@ function createWindow() {
   })
 
   // ── Security: Handle CORS for allowed API domains ──
+  // Strip Origin header so Chromium does not enforce CORS preflight at all.
+  const apiUrlPatterns = ALLOWED_API_DOMAINS.map(d => `https://${d}/*`)
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: apiUrlPatterns },
+    (details, callback) => {
+      delete details.requestHeaders['Origin']
+      delete details.requestHeaders['Referer']
+      callback({ requestHeaders: details.requestHeaders })
+    }
+  )
+
+  // Also inject permissive CORS response headers as a fallback.
+  // For OPTIONS preflight: return 204 so the browser accepts the CORS check
+  // (some API servers return 4xx for OPTIONS, which fails the preflight).
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const url = new URL(details.url)
     const isAllowed = ALLOWED_API_DOMAINS.some(
       d => url.hostname === d || url.hostname.endsWith('.' + d)
     )
     if (isAllowed) {
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          'access-control-allow-origin': ['*'],
-          'access-control-allow-headers': ['*'],
-          'access-control-allow-methods': ['GET, POST, PUT, DELETE, OPTIONS'],
-        },
-      })
+      const responseHeaders = {
+        ...details.responseHeaders,
+        'access-control-allow-origin': ['*'],
+        'access-control-allow-headers': ['*'],
+        'access-control-allow-methods': ['GET, POST, PUT, DELETE, OPTIONS'],
+      }
+      if (details.method === 'OPTIONS') {
+        callback({ responseHeaders, statusLine: 'HTTP/1.1 204 No Content' })
+      } else {
+        callback({ responseHeaders })
+      }
     } else {
       callback({ responseHeaders: details.responseHeaders })
     }

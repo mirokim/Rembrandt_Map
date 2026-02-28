@@ -152,11 +152,18 @@ export function parseMarkdownFile(file: VaultFile): LoadedDocument {
   const docId = filePathToDocId(file.relativePath)
   const sections = parseSections(body, docId)
 
+  // Extract folder path from relativePath (e.g. "Onion Flow/노드 시스템.md" → "Onion Flow")
+  const pathParts = file.relativePath.split(/[\\/]/)
+  const folderPath = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : ''
+
   return {
     id: docId,
-    filename: file.relativePath.split(/[\\/]/).pop() ?? file.relativePath,
+    filename: pathParts[pathParts.length - 1] ?? file.relativePath,
+    folderPath,
+    absolutePath: file.absolutePath,
     speaker,
     date,
+    mtime: file.mtime,
     tags,
     links,
     sections,

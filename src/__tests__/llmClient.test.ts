@@ -179,15 +179,16 @@ describe('llmClient — streamMessage', () => {
     expect(url).toContain('generativelanguage.googleapis.com')
   })
 
-  it('includes API key as query param for Gemini', async () => {
+  it('sends API key via x-goog-api-key header for Gemini', async () => {
     vi.stubEnv('VITE_GEMINI_API_KEY', 'my-gemini-key')
     mockFetch(makeGeminiStream(['ok']))
 
     const { streamMessage } = await import('@/services/llmClient')
     await streamMessage('plan_director', '테스트', [], () => {})
 
-    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(url).toContain('key=my-gemini-key')
+    const [url, opts] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(url).not.toContain('key=')
+    expect(opts.headers['x-goog-api-key']).toBe('my-gemini-key')
   })
 
   // ── Grok streaming ─────────────────────────────────────────────────────────
@@ -333,9 +334,9 @@ describe('fetchRAGContext()', () => {
     const { fetchRAGContext } = await import('@/services/llmClient')
     const result = await fetchRAGContext('아트 방향')
     expect(result).toContain('## 관련 문서')
-    expect(result).toContain('### 아트 컨셉')
+    expect(result).toContain('[문서] art.md > 아트 컨셉')
     expect(result).toContain('다크 판타지 스타일의 비주얼')
-    expect(result).toContain('출처: art.md')
+    expect(result).toContain('(art_director)')
   })
 
   it('filters out results with score <= 0.3', async () => {

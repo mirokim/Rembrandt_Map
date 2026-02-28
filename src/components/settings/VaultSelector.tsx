@@ -6,6 +6,9 @@
  * - Auto-reload on change (fs.watch)
  * - Reload and Clear buttons
  * - Shows document count and indexing status
+ *
+ * NOTE: Auto-load on app startup is handled by App.tsx (useVaultLoader hook).
+ * This component only handles the Settings UI and manual actions.
  */
 
 import { useEffect, useCallback, useRef } from 'react'
@@ -13,59 +16,7 @@ import { FolderOpen, RefreshCw, X, Loader2, AlertCircle } from 'lucide-react'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useBackendStore } from '@/stores/backendStore'
-import { parseVaultFiles } from '@/lib/markdownParser'
-import { buildGraph } from '@/lib/graphBuilder'
-import { vaultDocsToChunks } from '@/lib/vaultToChunks'
-
-// ── Hook: vault loading logic ─────────────────────────────────────────────────
-
-function useVaultLoader() {
-  const { vaultPath, setLoadedDocuments, setIsLoading, setError, setVaultPath } =
-    useVaultStore()
-  const { setNodes, setLinks, resetToMock } = useGraphStore()
-  const { setIndexing, setChunkCount, setError: setBackendError } = useBackendStore()
-
-  const loadVault = useCallback(
-    async (dirPath: string) => {
-      if (!window.vaultAPI) return
-      setIsLoading(true)
-      setError(null)
-      try {
-        const files = await window.vaultAPI.loadFiles(dirPath)
-        const docs = parseVaultFiles(files)
-        setLoadedDocuments(docs)
-
-        // Update graph
-        const { nodes, links } = buildGraph(docs)
-        setNodes(nodes)
-        setLinks(links)
-
-        // Index into backend if available
-        if (window.backendAPI && docs.length > 0) {
-          const chunks = vaultDocsToChunks(docs)
-          setIndexing(true)
-          window.backendAPI
-            .indexDocuments(chunks)
-            .then(({ indexed }) => setChunkCount(indexed))
-            .catch((err: unknown) =>
-              setBackendError(err instanceof Error ? err.message : String(err))
-            )
-            .finally(() => setIndexing(false))
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '파일 로드 실패')
-        setLoadedDocuments(null)
-        resetToMock()
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [setLoadedDocuments, setIsLoading, setError, setNodes, setLinks, resetToMock,
-     setIndexing, setChunkCount, setBackendError]
-  )
-
-  return { vaultPath, loadVault }
-}
+import { useVaultLoader } from '@/hooks/useVaultLoader'
 
 // ── VaultSelector component ───────────────────────────────────────────────────
 
@@ -78,20 +29,6 @@ export default function VaultSelector() {
   const { loadVault } = useVaultLoader()
   const cleanupWatcherRef = useRef<(() => void) | null>(null)
 
-  // ── Auto-load persisted vault on mount ────────────────────────────────────
-  useEffect(() => {
-    if (vaultPath && window.vaultAPI) {
-      loadVault(vaultPath).then(() => {
-        window.vaultAPI!.watchStart(vaultPath)
-      })
-    }
-    // Cleanup watcher on unmount
-    return () => {
-      window.vaultAPI?.watchStop()
-      cleanupWatcherRef.current?.()
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Subscribe to vault:changed events ────────────────────────────────────
   useEffect(() => {
     if (!window.vaultAPI || !vaultPath) return
@@ -103,6 +40,8 @@ export default function VaultSelector() {
   }, [vaultPath, loadVault])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
+
+  const isElectron = Boolean(window.vaultAPI)
 
   const handleSelectFolder = useCallback(async () => {
     if (!window.vaultAPI) return
@@ -166,6 +105,18 @@ export default function VaultSelector() {
         VAULT
       </p>
 
+      {/* Non-Electron notice */}
+      {!isElectron && (
+        <p className="text-xs mb-3 px-2 py-1.5 rounded" style={{
+          color: '#f59e0b',
+          background: 'rgba(245,158,11,0.08)',
+          border: '1px solid rgba(245,158,11,0.2)',
+        }}>
+          Electron 앱에서만 볼트를 선택할 수 있습니다.
+          브라우저(localhost) 환경에서는 Mock 데이터가 표시됩니다.
+        </p>
+      )}
+
       {/* Current vault path display */}
       {vaultPath ? (
         <div
@@ -189,13 +140,15 @@ export default function VaultSelector() {
       <div className="flex gap-2 mb-2">
         <button
           onClick={handleSelectFolder}
-          disabled={isLoading}
+          disabled={isLoading || !isElectron}
           className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded transition-colors hover:bg-[var(--color-bg-hover)]"
           style={{
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',
-            opacity: isLoading ? 0.5 : 1,
+            opacity: (isLoading || !isElectron) ? 0.4 : 1,
+            cursor: !isElectron ? 'not-allowed' : undefined,
           }}
+          title={!isElectron ? 'Electron 앱에서만 사용 가능' : undefined}
           data-testid="vault-select-btn"
         >
           <FolderOpen size={12} />

@@ -1,12 +1,17 @@
 /**
- * graphBuilder.ts — Phase 6
+ * graphBuilder.ts — Phase 7
  *
  * Generic graph construction from any document type (MockDocument or LoadedDocument).
- * Replaces the hard-coded mockGraph.ts functions with document-agnostic versions.
+ *
+ * Key change from Phase 6: ONE node per DOCUMENT (matching Obsidian's graph).
+ * Previously created one node per section, which produced many unwanted "(intro)" nodes.
+ *
+ * Supports Obsidian-style "phantom nodes": wiki link targets that don't have
+ * a corresponding .md file still appear as nodes in the graph.
  */
 
 import type { GraphNode, GraphLink, MockDocument, LoadedDocument, SpeakerId } from '@/types'
-import { truncate } from '@/lib/utils'
+import { slugify, truncate } from '@/lib/utils'
 
 // Internal union type — both shapes are structurally compatible
 type AnyDocument = MockDocument | LoadedDocument
@@ -15,50 +20,107 @@ type AnyDocument = MockDocument | LoadedDocument
 
 /**
  * Derive GraphNode[] from a document array.
- * One node per DocSection. Node id === section id (wiki-link slug).
+ * One node per DOCUMENT (not per section). Node id === doc.id.
  */
 export function buildGraphNodes(documents: AnyDocument[]): GraphNode[] {
-  const nodes: GraphNode[] = []
-  for (const doc of documents) {
-    for (const section of doc.sections) {
-      nodes.push({
-        id: section.id,
-        docId: doc.id,
-        speaker: doc.speaker as SpeakerId,
-        label: truncate(section.heading, 36),
-      })
-    }
-  }
-  return nodes
+  return documents.map((doc) => ({
+    id: doc.id,
+    docId: doc.id,
+    speaker: doc.speaker as SpeakerId,
+    label: truncate(doc.filename.replace(/\.md$/i, ''), 36),
+    folderPath: (doc as LoadedDocument).folderPath,
+    tags: doc.tags?.length ? doc.tags : undefined,
+  }))
 }
 
 // ── buildGraphLinks ───────────────────────────────────────────────────────────
 
 /**
- * Derive GraphLink[] by matching wikiLinks in sections to node ids.
+ * Derive GraphLink[] by resolving wikiLinks to document-level graph nodes.
+ *
+ * Resolution strategies (in order):
+ *   1. Direct doc ID match: wiki link matches an existing doc node ID
+ *   2. Section ID → parent doc: wiki link matches a section ID (mock data style)
+ *   3. Filename match: wiki link matches a document filename (Obsidian style)
+ *   4. Phantom node: create a ghost node for unresolved wiki links
+ *
  * Deduplicates bidirectional pairs (A→B same as B→A).
  */
 export function buildGraphLinks(
   documents: AnyDocument[],
   nodes: GraphNode[]
-): GraphLink[] {
+): { links: GraphLink[]; phantomNodes: GraphNode[] } {
   const nodeIds = new Set(nodes.map((n) => n.id))
+
+  // Lookup: section.id → parent doc.id (for mock data where wiki links = section IDs)
+  const sectionIdToDocId = new Map<string, string>()
+  for (const doc of documents) {
+    for (const section of doc.sections) {
+      sectionIdToDocId.set(section.id, doc.id)
+    }
+  }
+
+  // Lookup: normalised filename (without .md) → doc.id (for Obsidian [[note name]] style)
+  const filenameToDocId = new Map<string, string>()
+  for (const doc of documents) {
+    const filename = doc.filename.replace(/\.md$/i, '')
+    filenameToDocId.set(filename.toLowerCase(), doc.id)
+  }
+
   const links: GraphLink[] = []
   const seen = new Set<string>()
+  const phantomNodes = new Map<string, GraphNode>() // id → node
 
   for (const doc of documents) {
     for (const section of doc.sections) {
-      for (const wikiLink of section.wikiLinks) {
-        if (!nodeIds.has(wikiLink)) continue
-        // Canonical sorted pair for deduplication
-        const key = [section.id, wikiLink].sort().join('→')
+      for (const rawLink of section.wikiLinks) {
+        // Handle [[target|display]] alias syntax
+        const target = rawLink.split('|')[0].trim()
+        if (!target) continue
+
+        let targetDocId: string | undefined
+
+        // Strategy 1: direct doc ID match
+        if (nodeIds.has(target)) {
+          targetDocId = target
+        }
+
+        // Strategy 2: section ID → parent document (mock data style)
+        if (!targetDocId) {
+          targetDocId = sectionIdToDocId.get(target)
+        }
+
+        // Strategy 3: filename match (Obsidian [[note name]] style)
+        if (!targetDocId) {
+          targetDocId = filenameToDocId.get(target.toLowerCase())
+        }
+
+        // Strategy 4: create phantom node for unresolved wiki links
+        if (!targetDocId) {
+          const phantomId = `_phantom_${slugify(target)}`
+          if (!phantomNodes.has(phantomId)) {
+            phantomNodes.set(phantomId, {
+              id: phantomId,
+              docId: phantomId,
+              speaker: 'unknown' as SpeakerId,
+              label: truncate(target, 36),
+            })
+            nodeIds.add(phantomId)
+          }
+          targetDocId = phantomId
+        }
+
+        // Skip self-links (section linking to its own document)
+        if (targetDocId === doc.id) continue
+
+        const key = [doc.id, targetDocId].sort().join('→')
         if (seen.has(key)) continue
         seen.add(key)
-        links.push({ source: section.id, target: wikiLink, strength: 0.5 })
+        links.push({ source: doc.id, target: targetDocId, strength: 0.5 })
       }
     }
   }
-  return links
+  return { links, phantomNodes: Array.from(phantomNodes.values()) }
 }
 
 // ── buildGraph ────────────────────────────────────────────────────────────────
@@ -67,7 +129,7 @@ export function buildGraphLinks(
 export function buildGraph(
   documents: AnyDocument[]
 ): { nodes: GraphNode[]; links: GraphLink[] } {
-  const nodes = buildGraphNodes(documents)
-  const links = buildGraphLinks(documents, nodes)
-  return { nodes, links }
+  const docNodes = buildGraphNodes(documents)
+  const { links, phantomNodes } = buildGraphLinks(documents, docNodes)
+  return { nodes: [...docNodes, ...phantomNodes], links }
 }

@@ -1,8 +1,9 @@
-import { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
+import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
 import type { GraphNode, GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -15,7 +16,12 @@ const LABEL_Y_OFFSET = 16  // px below node center
 
 export default function Graph2D({ width, height }: Props) {
   const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
-  const { setSelectedDoc, setCenterTab, centerTab } = useUIStore()
+  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+
+  const nodeColorMap = useMemo(
+    () => buildNodeColorMap(nodes, nodeColorMode),
+    [nodes, nodeColorMode]
+  )
 
   // DOM refs — updated imperatively in simulation tick (avoids React re-render per frame)
   const nodeEls = useRef<Map<string, SVGCircleElement>>(new Map())
@@ -245,12 +251,12 @@ export default function Graph2D({ width, height }: Props) {
     setSelectedNode(nodeId)
   }, [setSelectedNode])
 
-  // Double click: select + open document viewer
+  // Double click: select + open editor (skip phantom nodes)
   const handleNodeDoubleClick = useCallback((nodeId: string, docId: string) => {
     setSelectedNode(nodeId)
     setSelectedDoc(docId)
-    setCenterTab('document')
-  }, [setSelectedNode, setSelectedDoc, setCenterTab])
+    if (!docId.startsWith('_phantom_')) openInEditor(docId)
+  }, [setSelectedNode, setSelectedDoc, openInEditor])
 
   const handleMouseEnter = useCallback((nodeId: string, e: React.MouseEvent) => {
     setHoveredNode(nodeId)
@@ -394,7 +400,7 @@ export default function Graph2D({ width, height }: Props) {
           {/* Nodes */}
           <g data-testid="graph-nodes">
             {nodes.map(node => {
-              const color = SPEAKER_CONFIG[node.speaker].color
+              const color = getNodeColor(node, nodeColorMode, nodeColorMap)
               const isSelected = selectedNodeId === node.id
               return (
                 <circle

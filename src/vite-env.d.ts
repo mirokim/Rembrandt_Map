@@ -14,6 +14,7 @@ declare global {
       minimize(): Promise<void>
       maximize(): Promise<void>
       close(): Promise<void>
+      toggleDevTools(): Promise<void>
     }
 
     // ── vaultAPI (Phase 6) ────────────────────────────────────────────────────
@@ -24,6 +25,8 @@ declare global {
       watchStop(): Promise<boolean>
       onChanged(callback: (data: { vaultPath: string }) => void): () => void
       saveFile(filePath: string, content: string): Promise<{ success: boolean; path: string }>
+      renameFile(absolutePath: string, newFilename: string): Promise<{ success: boolean; newPath: string }>
+      deleteFile(absolutePath: string): Promise<{ success: boolean }>
     }
 
     // ── backendAPI (Phase 1-3) ────────────────────────────────────────────────

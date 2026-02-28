@@ -1,9 +1,15 @@
 import type { ChatMessage, SpeakerId, DirectorId, Attachment } from '@/types'
 import type { ConversionMeta } from '@/lib/mdConverter'
-import { MODEL_OPTIONS, getProviderForModel, envKeyForProvider } from '@/lib/modelConfig'
+import { MODEL_OPTIONS, getProviderForModel } from '@/lib/modelConfig'
 import { PERSONA_PROMPTS } from '@/lib/personaPrompts'
 import { selectMockResponse } from '@/data/mockResponses'
-import { useSettingsStore } from '@/stores/settingsStore'
+import { useSettingsStore, getApiKey } from '@/stores/settingsStore'
+import {
+  expandWithGraphNeighbors,
+  rerankResults,
+  formatCompressedContext,
+  frontendKeywordSearch,
+} from '@/lib/graphRAG'
 
 // ── Obsidian MD conversion (MD 변환 에디터 파이프라인) ─────────────────────────
 
@@ -52,8 +58,7 @@ export async function convertToObsidianMD(
     return
   }
 
-  const envKey = envKeyForProvider(provider)
-  const apiKey = (import.meta.env as Record<string, string>)[envKey]
+  const apiKey = getApiKey(provider)
 
   if (!apiKey) {
     onChunk(fallbackOutput)
@@ -142,37 +147,58 @@ async function streamMockResponse(
   }
 }
 
-// ── RAG context fetcher (Phase 1-3) ───────────────────────────────────────────
+// ── Graph-Augmented RAG context fetcher ──────────────────────────────────────
 
 /**
- * Fetch relevant document chunks from the ChromaDB backend.
- * Returns a formatted context string to prepend to the system prompt,
- * or an empty string if the backend is unavailable or returns no results.
+ * Fetch relevant document chunks from ChromaDB and enhance with graph context.
+ *
+ * Pipeline:
+ *   1. Fetch top-8 candidates from ChromaDB (over-fetch for reranking headroom)
+ *   2. Filter by minimum similarity score (> 0.3)
+ *   3. Rerank by keyword overlap + speaker affinity → top 3
+ *   4. Expand with graph-connected neighbor sections (wiki-link traversal)
+ *   5. Format into compressed, token-efficient context string
  *
  * Failure is always non-fatal — the LLM call continues without RAG context.
+ *
+ * @param userMessage    The user's query text
+ * @param currentSpeaker Optional current persona for speaker affinity boost
  */
-export async function fetchRAGContext(userMessage: string): Promise<string> {
-  if (typeof window === 'undefined' || !window.backendAPI) return ''
+export async function fetchRAGContext(
+  userMessage: string,
+  currentSpeaker?: string
+): Promise<string> {
   try {
-    const response = await window.backendAPI.search(userMessage, 3)
-    if (!response.results || response.results.length === 0) return ''
+    let candidates: import('@/types').SearchResult[] = []
 
-    const relevant = response.results.filter((r) => r.score > 0.3)
+    if (typeof window !== 'undefined' && window.backendAPI) {
+      // ── Primary path: ChromaDB vector search via Python backend ──
+      try {
+        const response = await window.backendAPI.search(userMessage, 8)
+        candidates = response.results ?? []
+      } catch {
+        // Backend not running — fall through to frontend search
+        candidates = frontendKeywordSearch(userMessage, 8)
+      }
+    } else {
+      // ── Fallback: frontend keyword search over loaded vault documents ──
+      candidates = frontendKeywordSearch(userMessage, 8)
+    }
+
+    if (candidates.length === 0) return ''
+
+    // Stage 2: Filter by minimum similarity (lowered for keyword-only search)
+    const relevant = candidates.filter((r) => r.score > 0.15)
     if (relevant.length === 0) return ''
 
-    const chunks = relevant
-      .map((r) => {
-        const parts: string[] = []
-        if (r.heading) parts.push(`### ${r.heading}`)
-        parts.push(r.content)
-        parts.push(
-          `*출처: ${r.filename}${r.speaker ? ` (${r.speaker})` : ''}*`
-        )
-        return parts.join('\n')
-      })
-      .join('\n\n---\n\n')
+    // Stage 3: Rerank by keyword overlap + speaker affinity → top 3
+    const reranked = rerankResults(relevant, userMessage, 3, currentSpeaker)
 
-    return `## 관련 문서\n\n${chunks}\n\n`
+    // Stage 4: Expand with graph-connected neighbor sections
+    const neighbors = expandWithGraphNeighbors(reranked, 2)
+
+    // Stage 5: Format compressed context
+    return formatCompressedContext(reranked, neighbors)
   } catch {
     // RAG failure is non-fatal — continue without context
     return ''
@@ -216,8 +242,7 @@ export async function streamMessage(
     return
   }
 
-  const envKey = envKeyForProvider(provider)
-  const apiKey = (import.meta.env as Record<string, string>)[envKey]
+  const apiKey = getApiKey(provider)
 
   if (!apiKey) {
     // No API key configured — use mock
@@ -228,11 +253,12 @@ export async function streamMessage(
   const model = MODEL_OPTIONS.find((m) => m.id === modelId)!
   const basePrompt = PERSONA_PROMPTS[persona as DirectorId]
 
-  // ── RAG context injection (Phase 1-3) ──────────────────────────────────────
-  const ragContext = await fetchRAGContext(userMessage)
-  const systemPrompt = ragContext
-    ? `${ragContext}## 지시사항\n\n${basePrompt}`
-    : basePrompt
+  // ── Graph-Augmented RAG context injection ──────────────────────────────────
+  // RAG context is injected as a user-role message to prevent prompt injection
+  // from untrusted vault documents overriding system instructions.
+  // The persona is passed for speaker affinity boosting during reranking.
+  const ragContext = await fetchRAGContext(userMessage, persona)
+  const systemPrompt = basePrompt
 
   // ── Attachment processing ───────────────────────────────────────────────────
   // Separate image attachments (→ vision API) from text attachments (→ message injection)
@@ -246,6 +272,11 @@ export async function streamMessage(
       .map(a => `\n\n[첨부 파일: ${a.name}]\n${a.dataUrl}`)
       .join('')
     fullUserMessage = userMessage + textContext
+  }
+
+  // Prepend RAG context as reference material in the user message
+  if (ragContext) {
+    fullUserMessage = `${ragContext}---\n\n${fullUserMessage}`
   }
 
   // Build message history, excluding the current user message
@@ -276,7 +307,10 @@ export async function streamMessage(
     }
     case 'grok': {
       const { streamCompletion } = await import('./providers/grok')
-      // Grok uses OpenAI-compatible format; pass no image attachments
+      // Grok does not support vision — notify user if images were attached
+      if (imageAttachments.length > 0) {
+        onChunk('[Grok은 이미지 분석을 지원하지 않습니다. 텍스트만 처리됩니다.]\n\n')
+      }
       await streamCompletion(apiKey, modelId, systemPrompt, allMessages, onChunk)
       break
     }

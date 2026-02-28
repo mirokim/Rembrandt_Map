@@ -13,13 +13,15 @@ import type {
 } from '@/types'
 import { DEBATE_PROVIDER_LABELS, ROLE_OPTIONS, ROLE_DESCRIPTIONS } from './debateRoles'
 import { generateId } from '@/lib/utils'
+import { getApiKey } from '@/stores/settingsStore'
+import type { ProviderId } from '@/lib/modelConfig'
 
 // ── Default models per provider for debate ──────────────────────────────────
 
 const DEFAULT_DEBATE_MODELS: Record<string, string> = {
-  anthropic: 'claude-3-5-sonnet-20241022',
-  openai: 'gpt-4o',
-  gemini: 'gemini-2.0-flash',
+  anthropic: 'claude-sonnet-4-6',
+  openai: 'gpt-4.1',
+  gemini: 'gemini-2.5-flash',
   grok: 'grok-3',
 }
 
@@ -281,7 +283,7 @@ async function callDebateProvider(
     return { content: '요청이 취소되었습니다.', isError: true }
   }
 
-  const apiKey = (import.meta.env as Record<string, string>)[`VITE_${provider.toUpperCase()}_API_KEY`]
+  const apiKey = getApiKey(provider as ProviderId)
   if (!apiKey) {
     return { content: `[${DEBATE_PROVIDER_LABELS[provider] || provider}] API 키가 설정되지 않았습니다.`, isError: true }
   }

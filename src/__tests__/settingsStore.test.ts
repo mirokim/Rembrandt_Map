@@ -37,9 +37,9 @@ describe('settingsStore', () => {
     expect(personaModels.chief_director).toContain('claude')
   })
 
-  it('default art_director model is gpt-4o', () => {
+  it('default art_director model is gpt-4.1', () => {
     const { personaModels } = useSettingsStore.getState()
-    expect(personaModels.art_director).toBe('gpt-4o')
+    expect(personaModels.art_director).toBe('gpt-4.1')
   })
 
   it('default plan_director model is a Gemini model', () => {
@@ -68,11 +68,11 @@ describe('settingsStore', () => {
   it('setPersonaModel can be called multiple times independently', () => {
     const { setPersonaModel } = useSettingsStore.getState()
     setPersonaModel('chief_director', 'gpt-4o')
-    setPersonaModel('prog_director', 'gemini-2.0-flash')
+    setPersonaModel('prog_director', 'gemini-2.5-flash')
 
     const { personaModels } = useSettingsStore.getState()
     expect(personaModels.chief_director).toBe('gpt-4o')
-    expect(personaModels.prog_director).toBe('gemini-2.0-flash')
+    expect(personaModels.prog_director).toBe('gemini-2.5-flash')
   })
 
   // ── resetPersonaModels ─────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ describe('settingsStore', () => {
   it('resetPersonaModels restores all defaults', () => {
     const { setPersonaModel, resetPersonaModels } = useSettingsStore.getState()
     setPersonaModel('chief_director', 'gpt-4o')
-    setPersonaModel('art_director', 'gemini-1.5-pro')
+    setPersonaModel('art_director', 'gemini-2.5-pro')
 
     resetPersonaModels()
 

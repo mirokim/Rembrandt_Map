@@ -43,6 +43,10 @@ export interface GraphNode {
   speaker: SpeakerId
   /** Truncated section heading for display */
   label: string
+  /** Folder path relative to vault root (for folder color mode) */
+  folderPath?: string
+  /** Tags from frontmatter (for tag color mode) */
+  tags?: string[]
   // d3-force mutable position fields
   x?: number
   y?: number
@@ -109,6 +113,7 @@ export interface VaultFile {
   relativePath: string   // 볼트 루트 기준 (예: "subdir/note.md")
   absolutePath: string
   content: string        // UTF-8
+  mtime?: number         // 파일 수정 타임스탬프 (ms)
 }
 
 /**
@@ -119,8 +124,14 @@ export interface VaultFile {
 export interface LoadedDocument {
   id: string
   filename: string
+  /** Folder path relative to vault root (e.g. "Onion Flow"). Empty string for root-level files. */
+  folderPath: string
+  /** Absolute filesystem path (for save/rename/delete operations) */
+  absolutePath: string
   speaker: SpeakerId
   date: string
+  /** File last-modified timestamp (ms) — from filesystem stat */
+  mtime?: number
   tags: string[]
   links: string[]
   sections: DocSection[]
@@ -213,3 +224,4 @@ export type ThemeId = 'dark' | 'oled' | 'white'
 export type GraphMode = '3d' | '2d'
 export type CenterTab = 'graph' | 'document' | 'editor'
 export type AppState = 'launch' | 'main'
+export type NodeColorMode = 'document' | 'auto' | 'speaker' | 'folder' | 'tag' | 'topic'

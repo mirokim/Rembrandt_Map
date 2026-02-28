@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import ReactMarkdown from 'react-markdown'
 import type { DocSection, SpeakerId } from '@/types'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { parseWikiLinks } from '@/lib/wikiLinkParser'
 import WikiLink from './WikiLink'
 
 interface Props {
@@ -9,10 +9,24 @@ interface Props {
   speaker: SpeakerId
 }
 
+/** Convert [[slug]] and [[target|display]] to markdown links for react-markdown */
+function preprocessWikiLinks(text: string): string {
+  return text.replace(/\[\[([^\]]+)\]\]/g, (_match, inner: string) => {
+    const parts = inner.split('|')
+    const target = parts[0].trim()
+    const display = (parts[1] ?? parts[0]).trim()
+    return `[${display}](wikilink:${encodeURIComponent(target)})`
+  })
+}
+
 export default function ParagraphBlock({ section, speaker }: Props) {
   const [hovered, setHovered] = useState(false)
   const speakerColor = SPEAKER_CONFIG[speaker].color
-  const segments = parseWikiLinks(section.body)
+
+  const markdownBody = useMemo(
+    () => preprocessWikiLinks(section.body),
+    [section.body]
+  )
 
   return (
     <div
@@ -39,13 +53,31 @@ export default function ParagraphBlock({ section, speaker }: Props) {
       >
         {section.heading}
       </h2>
-      <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-        {segments.map((seg, i) =>
-          seg.type === 'wikilink'
-            ? <WikiLink key={i} slug={seg.slug} />
-            : <span key={i}>{seg.value}</span>
-        )}
-      </p>
+      <div
+        className="text-sm leading-relaxed prose-vault"
+        style={{ color: 'var(--color-text-secondary)' }}
+      >
+        <ReactMarkdown
+          urlTransform={(url) => url}
+          components={{
+            a({ href, children }) {
+              if (href?.startsWith('wikilink:')) {
+                const slug = decodeURIComponent(href.slice('wikilink:'.length))
+                return <WikiLink slug={slug} />
+              }
+              return (
+                <a href={href} target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
+                >
+                  {children}
+                </a>
+              )
+            },
+          }}
+        >
+          {markdownBody}
+        </ReactMarkdown>
+      </div>
     </div>
   )
 }

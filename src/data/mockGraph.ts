@@ -1,9 +1,8 @@
 /**
- * mockGraph.ts — Phase 6 refactor
+ * mockGraph.ts — Phase 7 refactor
  *
  * Now a thin wrapper around the generic graphBuilder.ts.
- * The original buildGraphNodes() / buildGraphLinks() signatures are preserved
- * so existing tests and imports continue to work without changes.
+ * Phase 7: one node per document (not per section).
  */
 
 import type { GraphNode, GraphLink } from '@/types'
@@ -26,7 +25,7 @@ export function buildGraphNodes(): GraphNode[] {
  * @deprecated Use graphBuilder.buildGraphLinks(docs, nodes) directly for non-mock data.
  */
 export function buildGraphLinks(nodes: GraphNode[]): GraphLink[] {
-  return _buildGraphLinks(MOCK_DOCUMENTS, nodes)
+  return _buildGraphLinks(MOCK_DOCUMENTS, nodes).links
 }
 
 export const MOCK_NODES: GraphNode[] = buildGraphNodes()

@@ -1,3 +1,9 @@
+import { Buffer } from 'buffer'
+// gray-matter uses Buffer.from() internally — polyfill for Vite browser bundle
+if (typeof globalThis.Buffer === 'undefined') {
+  globalThis.Buffer = Buffer
+}
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'

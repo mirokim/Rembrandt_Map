@@ -4,19 +4,21 @@ import TopBar from './TopBar'
 import ResizeHandle from './ResizeHandle'
 import FileTree from '@/components/fileTree/FileTree'
 import GraphPanel from '@/components/graph/GraphPanel'
-import DocViewer from '@/components/docViewer/DocViewer'
 import ChatPanel from '@/components/chat/ChatPanel'
 import SettingsPanel from '@/components/settings/SettingsPanel'
 import ConverterEditor from '@/components/converter/ConverterEditor'
+import MarkdownEditor from '@/components/editor/MarkdownEditor'
+import PhysicsControls from '@/components/graph/PhysicsControls'
 import { useUIStore } from '@/stores/uiStore'
 
 const LEFT_MIN = 140
 const LEFT_MAX = 340
 const RIGHT_MIN = 260
-const RIGHT_MAX = 480
+const RIGHT_MAX = 520
 
-const PANEL_SPRING = { type: 'spring', stiffness: 280, damping: 28 } as const
+const PANEL_SPRING = { type: 'spring', stiffness: 80, damping: 18, delay: 0.15 } as const
 const OVERLAY_TRANSITION = { duration: 0.2 }
+const COLLAPSE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 } as const
 
 // Shared glass panel style
 const glassPanelStyle = {
@@ -29,9 +31,9 @@ const glassPanelStyle = {
 }
 
 export default function MainLayout() {
-  const { centerTab } = useUIStore()
+  const { centerTab, editingDocId, leftPanelCollapsed, rightPanelCollapsed } = useUIStore()
   const [leftWidth, setLeftWidth] = useState(186)
-  const [rightWidth, setRightWidth] = useState(348)
+  const [rightWidth, setRightWidth] = useState(360)
 
   const handleLeftResize = useCallback((delta: number) => {
     setLeftWidth(w => Math.min(LEFT_MAX, Math.max(LEFT_MIN, w + delta)))
@@ -87,26 +89,31 @@ export default function MainLayout() {
           {/* Left panel — File tree */}
           <motion.div
             initial={{ x: -leftWidth, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={PANEL_SPRING}
+            animate={{
+              x: 0,
+              opacity: leftPanelCollapsed ? 0 : 1,
+              width: leftPanelCollapsed ? 0 : leftWidth,
+            }}
+            transition={leftPanelCollapsed ? COLLAPSE_TRANSITION : PANEL_SPRING}
             style={{
-              width: leftWidth,
-              minWidth: leftWidth,
-              margin: '8px 0 12px 12px',
+              minWidth: leftPanelCollapsed ? 0 : leftWidth,
+              margin: leftPanelCollapsed ? '0' : '8px 0 12px 12px',
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
-              pointerEvents: 'auto',
+              pointerEvents: leftPanelCollapsed ? 'none' : 'auto',
               ...glassPanelStyle,
             }}
           >
             <FileTree />
           </motion.div>
 
-          {/* Left resize handle */}
-          <div style={{ pointerEvents: 'auto', flexShrink: 0 }}>
-            <ResizeHandle onResize={handleLeftResize} />
-          </div>
+          {/* Left resize handle — hidden when collapsed */}
+          {!leftPanelCollapsed && (
+            <div style={{ pointerEvents: 'auto', flexShrink: 0 }}>
+              <ResizeHandle onResize={handleLeftResize} />
+            </div>
+          )}
 
           {/* Center — transparent spacer (graph shows through); overlays float here */}
           <div
@@ -117,28 +124,25 @@ export default function MainLayout() {
               margin: '8px 0 12px 0',
             }}
           >
-            {/* Document viewer overlay */}
-            {centerTab === 'document' && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={OVERLAY_TRANSITION}
+            {/* Physics controls — rendered here (above side panels in z-order) */}
+            {centerTab !== 'editor' && (
+              <div
                 style={{
                   position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
+                  bottom: 12,
+                  right: 12,
+                  zIndex: 5,
                   pointerEvents: 'auto',
-                  ...glassPanelStyle,
                 }}
               >
-                <DocViewer />
-              </motion.div>
+                <PhysicsControls />
+              </div>
             )}
 
-            {/* Converter editor overlay */}
+            {/* Editor overlay: Markdown editor (from file tree) or Converter (from toolbar) */}
             {centerTab === 'editor' && (
               <motion.div
+                key={editingDocId ?? 'converter'}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={OVERLAY_TRANSITION}
@@ -151,29 +155,34 @@ export default function MainLayout() {
                   ...glassPanelStyle,
                 }}
               >
-                <ConverterEditor />
+                {editingDocId ? <MarkdownEditor /> : <ConverterEditor />}
               </motion.div>
             )}
           </div>
 
-          {/* Right resize handle */}
-          <div style={{ pointerEvents: 'auto', flexShrink: 0 }}>
-            <ResizeHandle onResize={handleRightResize} />
-          </div>
+          {/* Right resize handle — hidden when collapsed */}
+          {!rightPanelCollapsed && (
+            <div style={{ pointerEvents: 'auto', flexShrink: 0 }}>
+              <ResizeHandle onResize={handleRightResize} />
+            </div>
+          )}
 
           {/* Right panel — Chat */}
           <motion.div
             initial={{ x: rightWidth, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={PANEL_SPRING}
+            animate={{
+              x: 0,
+              opacity: rightPanelCollapsed ? 0 : 1,
+              width: rightPanelCollapsed ? 0 : rightWidth,
+            }}
+            transition={rightPanelCollapsed ? COLLAPSE_TRANSITION : PANEL_SPRING}
             style={{
-              width: rightWidth,
-              minWidth: rightWidth,
-              margin: '8px 12px 12px 0',
+              minWidth: rightPanelCollapsed ? 0 : rightWidth,
+              margin: rightPanelCollapsed ? '0' : '8px 12px 12px 0',
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
-              pointerEvents: 'auto',
+              pointerEvents: rightPanelCollapsed ? 'none' : 'auto',
               ...glassPanelStyle,
             }}
           >

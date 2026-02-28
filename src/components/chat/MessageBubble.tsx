@@ -1,3 +1,5 @@
+import { useMemo } from 'react'
+import ReactMarkdown from 'react-markdown'
 import type { ChatMessage } from '@/types'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 
@@ -8,6 +10,27 @@ interface Props {
 export default function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user'
   const speakerMeta = SPEAKER_CONFIG[message.persona]
+
+  const renderedContent = useMemo(() => {
+    if (isUser) return null
+    return (
+      <ReactMarkdown
+        components={{
+          a({ href, children }) {
+            return (
+              <a href={href} target="_blank" rel="noopener noreferrer"
+                style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
+              >
+                {children}
+              </a>
+            )
+          },
+        }}
+      >
+        {message.content}
+      </ReactMarkdown>
+    )
+  }, [isUser, message.content])
 
   if (isUser) {
     return (
@@ -82,7 +105,7 @@ export default function MessageBubble({ message }: Props) {
 
       {/* Message content */}
       <div
-        className="flex-1 rounded-lg px-3 py-2 text-sm leading-relaxed"
+        className="flex-1 rounded-lg px-3 py-2 text-sm leading-relaxed prose-vault prose-chat"
         style={{
           background: `${speakerMeta.color}1a`, // 10% opacity
           color: 'var(--color-text-primary)',
@@ -105,7 +128,7 @@ export default function MessageBubble({ message }: Props) {
           </span>
         ) : (
           <>
-            {message.content}
+            {renderedContent}
             {/* Blinking block cursor while streaming */}
             {message.streaming && (
               <span

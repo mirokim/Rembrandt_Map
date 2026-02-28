@@ -1,5 +1,6 @@
-import { useGraphStore, DEFAULT_PHYSICS, PHYSICS_BOUNDS } from '@/stores/graphStore'
-import { RotateCcw } from 'lucide-react'
+import { useState } from 'react'
+import { useGraphStore, DEFAULT_PHYSICS } from '@/stores/graphStore'
+import { Settings, RotateCcw, ChevronRight, ChevronDown } from 'lucide-react'
 
 interface SliderDef {
   key: keyof typeof DEFAULT_PHYSICS
@@ -10,74 +11,128 @@ interface SliderDef {
 }
 
 const SLIDERS: SliderDef[] = [
-  { key: 'centerForce', label: 'Center', min: 0, max: 1, step: 0.01 },
-  { key: 'charge', label: 'Repulsion', min: -1000, max: 0, step: 10 },
-  { key: 'linkStrength', label: 'Link', min: 0, max: 2, step: 0.01 },
-  { key: 'linkDistance', label: 'Distance', min: 20, max: 300, step: 5 },
+  { key: 'centerForce', label: 'Center',    min: 0,     max: 1,   step: 0.01 },
+  { key: 'charge',      label: 'Repulsion', min: -1000, max: 0,   step: 10   },
+  { key: 'linkStrength',label: 'Link',      min: 0,     max: 2,   step: 0.01 },
+  { key: 'linkDistance',label: 'Distance',  min: 20,    max: 300, step: 5    },
 ]
 
 export default function PhysicsControls() {
   const { physics, updatePhysics, resetPhysics } = useGraphStore()
+  const [isOpen, setIsOpen] = useState(false)
 
   return (
     <div
       style={{
-        position: 'absolute',
-        bottom: 12,
-        right: 12,
-        background: 'var(--color-bg-surface)',
-        border: '1px solid var(--color-border)',
+        background: 'var(--color-bg-overlay)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 8,
-        padding: '10px 12px',
-        minWidth: 180,
-        backdropFilter: 'blur(4px)',
+        overflow: 'hidden',
       }}
       aria-label="Physics controls"
     >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-semibold tracking-wider uppercase" style={{ color: 'var(--color-text-muted)' }}>
+      {/* Header / toggle button */}
+      <button
+        onClick={() => setIsOpen(v => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 10px',
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: isOpen ? 'var(--color-accent)' : 'var(--color-text-muted)',
+          transition: 'color 0.15s',
+        }}
+        title="Physics controls 펼치기/접기"
+      >
+        <Settings size={11} />
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            flex: 1,
+            textAlign: 'left',
+          }}
+        >
           Physics
         </span>
-        <button
-          onClick={resetPhysics}
-          title="Reset physics"
-          aria-label="Reset physics"
-          className="hover:opacity-70"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          <RotateCcw size={11} />
-        </button>
-      </div>
+        {isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+      </button>
 
-      <div className="flex flex-col gap-2">
-        {SLIDERS.map(({ key, label, min, max, step }) => (
-          <div key={key} className="flex items-center gap-2">
-            <label
-              className="text-[10px] w-14 shrink-0"
-              style={{ color: 'var(--color-text-secondary)' }}
-              htmlFor={`slider-${key}`}
+      {/* Expanded sliders */}
+      {isOpen && (
+        <div
+          style={{
+            padding: '2px 10px 10px',
+            minWidth: 200,
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+            <button
+              onClick={resetPhysics}
+              title="Reset physics"
+              aria-label="Reset physics"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--color-text-muted)',
+                padding: 2,
+                lineHeight: 1,
+              }}
             >
-              {label}
-            </label>
-            <input
-              id={`slider-${key}`}
-              type="range"
-              min={min}
-              max={max}
-              step={step}
-              value={physics[key]}
-              onChange={e => updatePhysics({ [key]: Number(e.target.value) })}
-              className="flex-1"
-              aria-label={label}
-            />
-            <span className="text-[10px] w-10 text-right" style={{ color: 'var(--color-text-muted)' }}>
-              {key === 'charge'
-                ? physics[key].toFixed(0)
-                : physics[key].toFixed(2)}
-            </span>
+              <RotateCcw size={11} />
+            </button>
           </div>
-        ))}
-      </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {SLIDERS.map(({ key, label, min, max, step }) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label
+                  htmlFor={`slider-${key}`}
+                  style={{
+                    fontSize: 10,
+                    width: 56,
+                    flexShrink: 0,
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  {label}
+                </label>
+                <input
+                  id={`slider-${key}`}
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={physics[key]}
+                  onChange={e => updatePhysics({ [key]: Number(e.target.value) })}
+                  style={{ flex: 1 }}
+                  aria-label={label}
+                />
+                <span
+                  style={{
+                    fontSize: 10,
+                    width: 36,
+                    textAlign: 'right',
+                    color: 'var(--color-text-muted)',
+                  }}
+                >
+                  {key === 'charge' ? physics[key].toFixed(0) : physics[key].toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

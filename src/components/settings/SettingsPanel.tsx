@@ -13,8 +13,8 @@ import {
   Settings, Cpu, GitMerge, Keyboard, Info,
   Sun, Moon, Monitor, Globe,
 } from 'lucide-react'
-import { useSettingsStore, type AppTheme } from '@/stores/settingsStore'
-import { MODEL_OPTIONS } from '@/lib/modelConfig'
+import { useSettingsStore, getApiKey, type AppTheme } from '@/stores/settingsStore'
+import { MODEL_OPTIONS, type ProviderId } from '@/lib/modelConfig'
 import { SPEAKER_CONFIG, SPEAKER_IDS } from '@/lib/speakerConfig'
 import type { DirectorId } from '@/types'
 import VaultSelector from './VaultSelector'
@@ -78,13 +78,13 @@ const PROVIDER_LABELS: Record<string, string> = {
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function EnvHint({ provider }: { provider: string }) {
-  const envKey = `VITE_${provider.toUpperCase()}_API_KEY`
-  const hasKey = Boolean((import.meta.env as Record<string, string>)[envKey])
+  const storeKey = useSettingsStore(s => s.apiKeys[provider as ProviderId])
+  const hasKey = Boolean(storeKey) || Boolean((import.meta.env as Record<string, string>)[`VITE_${provider.toUpperCase()}_API_KEY`])
   return (
     <span
       className="text-[10px] ml-1 shrink-0"
       style={{ color: hasKey ? '#4caf50' : 'var(--color-text-muted)' }}
-      title={hasKey ? 'API 키 설정됨' : `.env에 ${envKey} 추가 필요`}
+      title={hasKey ? 'API 키 설정됨' : 'API 키 미설정'}
     >
       {hasKey ? '●' : '○'}
     </span>
@@ -160,11 +160,79 @@ function GeneralContent() {
   )
 }
 
+const API_KEY_PROVIDERS: { id: ProviderId; label: string; placeholder: string }[] = [
+  { id: 'anthropic', label: 'Anthropic (Claude)',  placeholder: 'sk-ant-...' },
+  { id: 'openai',    label: 'OpenAI (GPT)',        placeholder: 'sk-...' },
+  { id: 'gemini',    label: 'Google (Gemini)',      placeholder: 'AIza...' },
+  { id: 'grok',      label: 'xAI (Grok)',          placeholder: 'xai-...' },
+]
+
 function AIContent() {
-  const { personaModels, setPersonaModel } = useSettingsStore()
+  const { personaModels, setPersonaModel, apiKeys, setApiKey } = useSettingsStore()
+  const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
+
+  const toggleKeyVisibility = (id: string) =>
+    setVisibleKeys(prev => ({ ...prev, [id]: !prev[id] }))
 
   return (
     <div className="flex flex-col gap-5" data-testid="model-section">
+
+      {/* API Keys */}
+      <section>
+        <h3 className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>API 키</h3>
+        <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>
+          각 AI 제공자의 API 키를 입력하세요. 브라우저 로컬 스토리지에 저장됩니다.
+        </p>
+        <div className="flex flex-col gap-2.5">
+          {API_KEY_PROVIDERS.map(({ id, label, placeholder }) => {
+            const hasEnv = Boolean((import.meta.env as Record<string, string>)[`VITE_${id.toUpperCase()}_API_KEY`])
+            const storeValue = apiKeys[id] ?? ''
+            const hasKey = Boolean(storeValue) || hasEnv
+            return (
+              <div key={id} className="flex items-center gap-2">
+                <div
+                  className="shrink-0 text-[11px] font-medium"
+                  style={{ color: 'var(--color-text-secondary)', minWidth: 120 }}
+                >
+                  {label}
+                  <span
+                    className="text-[10px] ml-1.5"
+                    style={{ color: hasKey ? '#4caf50' : 'var(--color-text-muted)' }}
+                  >{hasKey ? '●' : '○'}</span>
+                </div>
+                <div className="flex-1 relative">
+                  <input
+                    type={visibleKeys[id] ? 'text' : 'password'}
+                    value={storeValue}
+                    onChange={e => setApiKey(id, e.target.value)}
+                    placeholder={hasEnv ? '(환경변수 사용 중)' : placeholder}
+                    className="w-full text-xs rounded px-2 py-1.5 pr-7 font-mono"
+                    style={{
+                      background: 'var(--color-bg-surface)',
+                      color: 'var(--color-text-primary)',
+                      border: '1px solid var(--color-border)',
+                      outline: 'none',
+                    }}
+                    autoComplete="off"
+                    data-testid={`api-key-${id}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleKeyVisibility(id)}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] px-1"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    tabIndex={-1}
+                  >
+                    {visibleKeys[id] ? '숨김' : '보기'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <div style={{ borderTop: '1px solid var(--color-border)' }} />
 
       {/* Vault */}
       <section data-testid="vault-section">
@@ -322,8 +390,8 @@ export default function SettingsPanel() {
             <div
               className="flex overflow-hidden"
               style={{
-                width: 720,
-                height: 540,
+                width: 760,
+                height: 680,
                 background: 'var(--color-bg-secondary)',
                 border: '1px solid var(--color-border)',
                 borderRadius: 12,

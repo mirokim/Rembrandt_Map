@@ -123,27 +123,6 @@ function Svg2DSequence({ stage }: { stage: Stage }) {
       style={{ position: 'relative', width: 300, height: 300 }}
       data-testid="launch-svg"
     >
-      {/* Title */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={stage === 'center' || stage === 'nodes' || stage === 'descend'
-          ? { opacity: 1, y: 0, transition: { delay: 0.2, duration: 0.5 } }
-          : { opacity: 0, y: 8 }
-        }
-        style={{
-          position: 'absolute',
-          top: 10,
-          left: 0, right: 0,
-          textAlign: 'center',
-          fontSize: 11,
-          letterSpacing: '0.15em',
-          color: 'var(--color-text-muted)',
-          fontFamily: 'monospace',
-        }}
-      >
-        REMBRANDT MAP
-      </motion.div>
-
       {/* Center node + satellites */}
       <motion.div
         variants={containerVariants}

@@ -22,13 +22,13 @@ export default function NodeTooltip({ nodeId, x, y }: NodeTooltipProps) {
   const info = useMemo(() => {
     const node = nodes.find(n => n.id === nodeId)
     if (!node) return null
+    // node.id === doc.id (document-level nodes since Phase 7)
     const doc = allDocuments.find(d => d.id === node.docId)
-    const section = doc?.sections.find(s => s.id === nodeId)
-    return { node, doc, section }
+    return { node, doc }
   }, [nodeId, nodes, allDocuments])
 
   if (!info) return null
-  const { node, doc, section } = info
+  const { node, doc } = info
   const { color } = SPEAKER_CONFIG[node.speaker]
 
   const offsetX = x + 16
@@ -56,9 +56,9 @@ export default function NodeTooltip({ nodeId, x, y }: NodeTooltipProps) {
       <div className="text-[10px] font-semibold tracking-wider uppercase mb-1" style={{ color }}>
         {SPEAKER_CONFIG[node.speaker].label}
       </div>
-      {/* Section heading */}
+      {/* Document name */}
       <div className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
-        {section?.heading ?? node.label}
+        {node.label}
       </div>
       {/* Doc filename */}
       {doc && (

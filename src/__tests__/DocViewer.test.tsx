@@ -140,15 +140,30 @@ describe('ParagraphBlock — hover highlight', () => {
 
 describe('WikiLink — navigation', () => {
   it('clicking a wiki link navigates to the matching graph node', () => {
-    // Find a doc+section that has at least one wikiLink pointing to an existing node
+    // Find a doc+section that has at least one wikiLink that resolves to another doc's section
+    // Phase 7: nodes are document-level, so wikiLink slugs match section IDs → parent doc
     const doc = MOCK_DOCUMENTS.find(d =>
-      d.sections.some(s => s.wikiLinks.some(slug => MOCK_NODES.some(n => n.id === slug)))
+      d.sections.some(s => s.wikiLinks.some(slug => {
+        // Check if slug matches another doc's section ID
+        const targetDoc = MOCK_DOCUMENTS.find(td =>
+          td.id !== d.id && td.sections.some(ts => ts.id === slug)
+        )
+        return !!targetDoc
+      }))
     )!
     const section = doc.sections.find(s =>
-      s.wikiLinks.some(slug => MOCK_NODES.some(n => n.id === slug))
+      s.wikiLinks.some(slug =>
+        MOCK_DOCUMENTS.some(td => td.id !== doc.id && td.sections.some(ts => ts.id === slug))
+      )
     )!
-    const slug = section.wikiLinks.find(s => MOCK_NODES.some(n => n.id === s))!
-    const targetNode = MOCK_NODES.find(n => n.id === slug)!
+    const slug = section.wikiLinks.find(s =>
+      MOCK_DOCUMENTS.some(td => td.id !== doc.id && td.sections.some(ts => ts.id === s))
+    )!
+    // The target node is the document containing the section with that slug
+    const targetDoc = MOCK_DOCUMENTS.find(td =>
+      td.sections.some(ts => ts.id === slug)
+    )!
+    const targetNode = MOCK_NODES.find(n => n.id === targetDoc.id)!
 
     useUIStore.setState({ ...useUIStore.getState(), selectedDocId: doc.id })
     render(<DocViewer />)

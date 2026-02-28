@@ -8,9 +8,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 // ── windowAPI (Fix 0) — frameless window controls ─────────────────────────────
 contextBridge.exposeInMainWorld('windowAPI', {
-  minimize: () => ipcRenderer.invoke('window:minimize'),
-  maximize: () => ipcRenderer.invoke('window:maximize'),
-  close:    () => ipcRenderer.invoke('window:close'),
+  minimize:       () => ipcRenderer.invoke('window:minimize'),
+  maximize:       () => ipcRenderer.invoke('window:maximize'),
+  close:          () => ipcRenderer.invoke('window:close'),
+  toggleDevTools: () => ipcRenderer.invoke('window:toggle-devtools'),
 })
 
 // ── vaultAPI (Phase 6) ────────────────────────────────────────────────────────
@@ -27,8 +28,15 @@ contextBridge.exposeInMainWorld('vaultAPI', {
   /** Stop the active file watcher */
   watchStop: () => ipcRenderer.invoke('vault:watch-stop'),
 
-  /** Save a file to the filesystem (used by MD converter) */
+  /** Save a file to the filesystem (used by MD converter and editor) */
   saveFile: (filePath, content) => ipcRenderer.invoke('vault:save-file', filePath, content),
+
+  /** Rename a file — newFilename is just the filename (no path) */
+  renameFile: (absolutePath, newFilename) =>
+    ipcRenderer.invoke('vault:rename-file', absolutePath, newFilename),
+
+  /** Permanently delete a file */
+  deleteFile: (absolutePath) => ipcRenderer.invoke('vault:delete-file', absolutePath),
 
   /**
    * Subscribe to vault file-change events.

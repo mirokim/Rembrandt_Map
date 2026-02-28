@@ -16,6 +16,7 @@ function resetStore() {
 const makeDoc = (id: string): LoadedDocument => ({
   id,
   filename: `${id}.md`,
+  folderPath: '',
   speaker: 'art_director',
   date: '2024-01-01',
   tags: [],

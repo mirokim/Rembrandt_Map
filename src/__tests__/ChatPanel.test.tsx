@@ -46,10 +46,6 @@ describe('ChatPanel — structure', () => {
     expect(screen.getByTestId('chat-input-container')).toBeInTheDocument()
   })
 
-  it('renders disclaimer', () => {
-    render(<ChatPanel />)
-    expect(screen.getByTestId('chat-disclaimer')).toBeInTheDocument()
-  })
 })
 
 describe('PersonaChips — toggle', () => {
