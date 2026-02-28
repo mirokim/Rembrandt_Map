@@ -165,11 +165,15 @@ export default function FileTree() {
   // Tracks folders created this session (may be empty on disk — won't appear in folderGroups yet)
   const [extraFolders, setExtraFolders] = useState<string[]>([])
 
-  const handleExpandAll = useCallback(() => setExpandOverride(true), [])
-  const handleCollapseAll = useCallback(() => setExpandOverride(false), [])
+  const handleExpandCollapseToggle = useCallback(() => {
+    setExpandOverride(prev => (prev === true ? false : true))
+  }, [])
   const handleGroupToggle = useCallback(() => {
     if (expandOverride !== null) setExpandOverride(null)
   }, [expandOverride])
+  const handleGroupModeToggle = useCallback(() => {
+    setGroupMode(m => m === 'folder' ? 'tag' : 'folder')
+  }, [])
 
   const groupsToShow: SpeakerId[] = [...SPEAKER_IDS]
   if (grouped['unknown' as SpeakerId]?.length) {
@@ -386,32 +390,21 @@ export default function FileTree() {
 
         <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
 
-        <button style={iconBtn()} title="모두 펼치기" onClick={handleExpandAll}>
-          <ChevronsUpDown size={11} />
-        </button>
-
-        <button style={iconBtn()} title="모두 접기" onClick={handleCollapseAll}>
-          <ChevronsDownUp size={11} />
-        </button>
-
-        <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
-
         <button
-          style={iconBtn(isVaultLoaded && groupMode === 'folder')}
-          title="폴더별 보기"
-          onClick={() => setGroupMode('folder')}
-          disabled={!isVaultLoaded}
+          style={iconBtn(expandOverride !== null)}
+          title={expandOverride === true ? '모두 접기' : '모두 펼치기'}
+          onClick={handleExpandCollapseToggle}
         >
-          <Folder size={11} />
+          {expandOverride === true ? <ChevronsDownUp size={11} /> : <ChevronsUpDown size={11} />}
         </button>
 
         <button
-          style={iconBtn(isVaultLoaded && groupMode === 'tag')}
-          title="태그별 보기"
-          onClick={() => setGroupMode('tag')}
+          style={iconBtn(isVaultLoaded)}
+          title={groupMode === 'folder' ? '태그별 보기로 전환' : '폴더별 보기로 전환'}
+          onClick={handleGroupModeToggle}
           disabled={!isVaultLoaded}
         >
-          <Tag size={11} />
+          {groupMode === 'tag' ? <Tag size={11} /> : <Folder size={11} />}
         </button>
 
         <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />

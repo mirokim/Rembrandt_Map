@@ -16,6 +16,7 @@ import { EditorState, Compartment } from '@codemirror/state'
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
+import matter from 'gray-matter'
 import { ArrowLeft, Save, CheckCircle, AlertCircle, X, Lock, Unlock, Pencil } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
@@ -35,6 +36,19 @@ import {
 } from '@/lib/editor/markdownHelpers'
 
 const AUTOSAVE_DELAY = 3000
+
+// YAML frontmatter의 tags 필드를 업데이트한 전체 문자열을 반환한다.
+function updateFrontmatterTags(rawContent: string, newTags: string[]): string {
+  const trimmed = rawContent.trimStart()
+  if (!trimmed.startsWith('---')) {
+    if (newTags.length === 0) return rawContent
+    return `---\ntags: [${newTags.join(', ')}]\n---\n\n${rawContent}`
+  }
+  const parsed = matter(rawContent)
+  if (newTags.length > 0) parsed.data.tags = newTags
+  else delete parsed.data.tags
+  return matter.stringify(parsed.content, parsed.data)
+}
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -141,6 +155,9 @@ export default function MarkdownEditor() {
 
   const [isLocked, setIsLocked] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
+  const [localTags, setLocalTags] = useState<string[]>(doc?.tags ?? [])
+  const [isAddingTag, setIsAddingTag] = useState(false)
+  const [tagInput, setTagInput] = useState('')
   const [wikiSuggest, setWikiSuggest] = useState<WikiSuggestState | null>(null)
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
@@ -494,6 +511,33 @@ export default function MarkdownEditor() {
     })
   }, [isLocked])
 
+  // 문서 전환 시 localTags 동기화
+  useEffect(() => {
+    setLocalTags(doc?.tags ?? [])
+    setIsAddingTag(false)
+    setTagInput('')
+  }, [doc?.id])
+
+  // ── 태그 편집 ──────────────────────────────────────────────────────────────
+
+  const handleTagChange = useCallback((newTags: string[]) => {
+    setLocalTags(newTags)
+    const currentRaw = viewRef.current?.state.doc.toString() ?? ''
+    const newRaw = updateFrontmatterTags(currentRaw, newTags)
+    if (viewRef.current) {
+      viewRef.current.dispatch({
+        changes: { from: 0, to: viewRef.current.state.doc.length, insert: newRaw },
+      })
+    }
+  }, [])
+
+  const commitTag = useCallback(() => {
+    const trimmed = tagInput.trim()
+    if (trimmed) handleTagChange([...localTags, trimmed])
+    setTagInput('')
+    setIsAddingTag(false)
+  }, [tagInput, localTags, handleTagChange])
+
   // ── 문서 없음 ─────────────────────────────────────────────────────────────
 
   if (!doc) {
@@ -615,19 +659,57 @@ export default function MarkdownEditor() {
         </button>
       </div>
 
-      {/* ── Metadata bar ── */}
-      {((doc as LoadedDocument).folderPath || doc.tags?.length > 0) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+      {/* ── Metadata bar (tags + folder) ── */}
+      {(doc as LoadedDocument).absolutePath && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderBottom: '1px solid var(--color-border)', flexShrink: 0, flexWrap: 'wrap', minHeight: 28 }}>
           {(doc as LoadedDocument).folderPath && (
-            <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+            <span style={{ fontSize: 10, color: 'var(--color-text-muted)', marginRight: 2 }}>
               📁 {(doc as LoadedDocument).folderPath}
             </span>
           )}
-          {doc.tags?.map(tag => (
-            <span key={tag} style={{ fontSize: 10, color: 'var(--color-accent)', background: 'var(--color-bg-active)', borderRadius: 3, padding: '1px 5px' }}>
+
+          {localTags.map(tag => (
+            <span
+              key={tag}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--color-accent)', background: 'var(--color-bg-active)', borderRadius: 3, padding: '1px 5px' }}
+            >
               #{tag}
+              {!isLocked && (
+                <button
+                  onClick={() => handleTagChange(localTags.filter(t => t !== tag))}
+                  style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', padding: 0, fontSize: 10, lineHeight: 1 }}
+                  title={`"${tag}" 태그 제거`}
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
+
+          {!isLocked && (
+            isAddingTag
+              ? <input
+                  autoFocus
+                  value={tagInput}
+                  placeholder="태그 이름"
+                  onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitTag() }
+                    if (e.key === 'Escape') { setTagInput(''); setIsAddingTag(false) }
+                  }}
+                  onBlur={commitTag}
+                  style={{ fontSize: 10, background: 'transparent', border: 'none', borderBottom: '1px solid var(--color-accent)', color: 'var(--color-text-primary)', width: 72, outline: 'none', padding: '1px 0' }}
+                />
+              : <button
+                  onClick={() => setIsAddingTag(true)}
+                  style={{ fontSize: 10, color: 'var(--color-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 3, transition: 'color 0.1s' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-text-primary)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+                  title="태그 추가"
+                >
+                  + 태그
+                </button>
+          )}
         </div>
       )}
 
