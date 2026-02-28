@@ -3,10 +3,10 @@ import type { GraphNode, GraphLink, PhysicsParams } from '@/types'
 import { MOCK_NODES, MOCK_LINKS } from '@/data/mockGraph'
 
 const DEFAULT_PHYSICS: PhysicsParams = {
-  centerForce: 0.05,
-  charge: -300,
-  linkStrength: 0.5,
-  linkDistance: 80,
+  centerForce: 0.8,
+  charge: -80,
+  linkStrength: 0.7,
+  linkDistance: 60,
 }
 
 const PHYSICS_BOUNDS = {

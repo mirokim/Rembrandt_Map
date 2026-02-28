@@ -16,8 +16,11 @@
     "electron:build": "npx vite build && npx electron-builder --config electron-builder.config.cjs"
   },
   "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@lezer/highlight": "^1.2.3",
     "@testing-library/dom": "^10.4.1",
     "clsx": "^2.1.1",
+    "codemirror": "^6.0.2",
     "d3-force": "^3.0.0",
     "d3-force-3d": "^3.0.6",
     "framer-motion": "^12.34.3",

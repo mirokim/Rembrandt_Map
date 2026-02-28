@@ -25,6 +25,12 @@ interface Options {
  * 3D force simulation hook using d3-force-3d.
  * Reads nodes/links from graphStore so vault data is reflected automatically.
  * Reinitializes whenever the node/link dataset changes (vault load or clear).
+ *
+ * NOTE: Uses a custom per-node gravity force instead of forceCenter.
+ * forceCenter only translates the mean position of the entire graph — it
+ * does NOT pull disconnected clusters toward each other.
+ * The gravity force applies an individual spring-to-origin for every node,
+ * so unconnected components all converge near (0,0,0).
  */
 export function useGraphSimulation3D({ onTick }: Options) {
   const { nodes, links, physics } = useGraphStore()
@@ -34,11 +40,15 @@ export function useGraphSimulation3D({ onTick }: Options) {
   const onTickRef = useRef(onTick)
   onTickRef.current = onTick
 
+  // Shared mutable ref so the reheat effect can update gravity strength
+  // without reinitialising the whole simulation.
+  const gravityStrengthRef = useRef(physics.centerForce * 0.1)
+
   // Initialize (or reinitialize) simulation when nodes/links dataset changes
   useEffect(() => {
     let cancelled = false
 
-    const spread = 200
+    const spread = 80
     simNodesRef.current = nodes.map(n => ({
       ...n,
       x: (Math.random() - 0.5) * spread,
@@ -48,16 +58,18 @@ export function useGraphSimulation3D({ onTick }: Options) {
     }))
     simLinksRef.current = links.map(l => ({ ...l })) as SimLink3D[]
 
+    // Capture stable reference for this simulation run
+    const sNodes = simNodesRef.current
+
     // Dynamically import d3-force-3d so Vitest can easily mock it
     import('d3-force-3d').then(({
       forceSimulation,
       forceLink,
       forceManyBody,
-      forceCenter,
     }) => {
       if (cancelled) return
 
-      const sim = (forceSimulation as (nodes: SimNode3D[]) => any)(simNodesRef.current)
+      const sim = (forceSimulation as (nodes: SimNode3D[]) => any)(sNodes)
         .numDimensions(3)
         .force(
           'link',
@@ -67,7 +79,17 @@ export function useGraphSimulation3D({ onTick }: Options) {
             .distance(physics.linkDistance),
         )
         .force('charge', (forceManyBody as () => any)().strength(physics.charge))
-        .force('center', (forceCenter as (x: number, y: number, z: number) => any)(0, 0, 0).strength(physics.centerForce))
+        // Per-node gravity: each node is pulled toward origin individually.
+        // This brings disconnected clusters together, unlike forceCenter which
+        // only translates the mean of the entire graph.
+        .force('center', (alpha: number) => {
+          const g = gravityStrengthRef.current
+          for (const n of sNodes) {
+            n.vx -= n.x * g * alpha
+            n.vy -= n.y * g * alpha
+            n.vz -= n.z * g * alpha
+          }
+        })
 
       sim.on('tick', () => {
         onTickRef.current(simNodesRef.current, simLinksRef.current)
@@ -89,11 +111,12 @@ export function useGraphSimulation3D({ onTick }: Options) {
 
   // Reheat when physics params change (without reinitializing nodes/links)
   useEffect(() => {
+    gravityStrengthRef.current = physics.centerForce * 0.1
     const sim = simRef.current as any
     if (!sim) return
     sim.force('link')?.strength(physics.linkStrength).distance(physics.linkDistance)
     sim.force('charge')?.strength(physics.charge)
-    sim.force('center')?.strength(physics.centerForce)
+    // 'center' is a closure that reads gravityStrengthRef.current — no re-registration needed
     sim.alpha(0.3).restart()
   }, [physics])
 

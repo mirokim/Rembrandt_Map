@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useGraphStore, DEFAULT_PHYSICS } from '@/stores/graphStore'
-import { Settings, RotateCcw, ChevronRight, ChevronDown } from 'lucide-react'
+import { Settings, RotateCcw, ChevronRight, ChevronDown, Home } from 'lucide-react'
+import { graphCallbacks } from '@/lib/graphEvents'
 
 interface SliderDef {
   key: keyof typeof DEFAULT_PHYSICS
@@ -75,11 +76,26 @@ export default function PhysicsControls() {
             borderTop: '1px solid rgba(255,255,255,0.06)',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, marginBottom: 6 }}>
+            <button
+              onClick={() => graphCallbacks.resetCamera?.()}
+              title="뷰포트 초기화"
+              aria-label="뷰포트 초기화"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--color-text-muted)',
+                padding: 2,
+                lineHeight: 1,
+              }}
+            >
+              <Home size={11} />
+            </button>
             <button
               onClick={resetPhysics}
-              title="Reset physics"
-              aria-label="Reset physics"
+              title="Physics 초기화"
+              aria-label="Physics 초기화"
               style={{
                 background: 'transparent',
                 border: 'none',
