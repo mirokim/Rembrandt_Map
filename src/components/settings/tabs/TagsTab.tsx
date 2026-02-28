@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Tag, Plus, X } from 'lucide-react'
+import { Tag, Plus, X, Shuffle } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getAutoPaletteColor } from '@/lib/nodeColors'
 
@@ -24,9 +24,27 @@ export default function TagsTab() {
         <div className="flex items-center gap-1.5 mb-1.5">
           <Tag size={13} style={{ color: 'var(--color-text-muted)' }} />
           <h3 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>태그 프리셋</h3>
+          {tagPresets.length > 0 && (
+            <button
+              onClick={() => tagPresets.forEach(t => setTagColor(t, getAutoPaletteColor(t)))}
+              title="모든 태그 색상을 자동 팔레트로 일괄 배정"
+              className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors"
+              style={{
+                background: 'var(--color-bg-surface)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.borderColor = 'var(--color-border)' }}
+            >
+              <Shuffle size={10} />
+              자동 배정
+            </button>
+          )}
         </div>
         <p className="text-[11px] mb-4" style={{ color: 'var(--color-text-muted)' }}>
-          AI 태그 제안 시 이 목록에서만 선택합니다. 확신이 없으면 빈 태그로 남깁니다.
+          AI 태그 제안 시 이 목록에서만 선택합니다. 왼쪽 색상 점을 클릭해 그래프 노드 색상을 지정하세요.
         </p>
 
         {/* 현재 프리셋 목록 */}
