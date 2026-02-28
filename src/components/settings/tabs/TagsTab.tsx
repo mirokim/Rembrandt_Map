@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Tag, Plus, X, Shuffle } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getAutoPaletteColor } from '@/lib/nodeColors'
@@ -8,6 +8,15 @@ export default function TagsTab() {
   const [input, setInput] = useState('')
   const [isAutoAssigning, setIsAutoAssigning] = useState(false)
   const [assignProgress, setAssignProgress] = useState(0)
+
+  // 기존 프리셋 중 색상이 없는 것들 마운트 시 자동 배정
+  useEffect(() => {
+    const missing = tagPresets.filter(t => !tagColors[t])
+    if (missing.length > 0) {
+      missing.forEach(t => setTagColor(t, getAutoPaletteColor(t)))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleAdd = () => {
     const trimmed = input.trim()

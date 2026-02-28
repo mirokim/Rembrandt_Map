@@ -244,7 +244,10 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       removeTagPreset: (tag) =>
-        set((s) => ({ tagPresets: s.tagPresets.filter(t => t !== tag) })),
+        set((s) => ({
+          tagPresets: s.tagPresets.filter(t => t !== tag),
+          tagColors: Object.fromEntries(Object.entries(s.tagColors).filter(([k]) => k !== tag)),
+        })),
 
       setTagColor: (tag, color) =>
         set((s) => ({ tagColors: { ...s.tagColors, [tag]: color } })),
