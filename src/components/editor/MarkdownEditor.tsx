@@ -20,6 +20,7 @@ import matter from 'gray-matter'
 import { ArrowLeft, Save, CheckCircle, AlertCircle, X, Lock, Unlock, Pencil, Wand2, RotateCcw, Loader2 } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { parseMarkdownFile, parseVaultFiles } from '@/lib/markdownParser'
 import { buildGraph } from '@/lib/graphBuilder'
@@ -143,6 +144,7 @@ function SuggestDropdown({ docs, selectedIdx, rect, onSelect }: SuggestDropdownP
 export default function MarkdownEditor() {
   const { editingDocId, closeEditor, openInEditor } = useUIStore()
   const { loadedDocuments, setLoadedDocuments, vaultPath } = useVaultStore()
+  const tagPresets = useSettingsStore(s => s.tagPresets)
   const { setNodes, setLinks } = useGraphStore()
 
   const doc = (
@@ -236,7 +238,7 @@ export default function MarkdownEditor() {
     try {
       await window.vaultAPI!.renameFile(currentDoc.absolutePath, newFilename)
       if (vaultPath && window.vaultAPI) {
-        const files = await window.vaultAPI.loadFiles(vaultPath)
+        const { files } = await window.vaultAPI.loadFiles(vaultPath)
         if (files) {
           const docs = parseVaultFiles(files) as LoadedDocument[]
           setLoadedDocuments(docs)
@@ -717,18 +719,35 @@ export default function MarkdownEditor() {
 
           {!isLocked && (
             isAddingTag
-              ? <input
-                  autoFocus
-                  value={tagInput}
-                  placeholder="태그 이름"
-                  onChange={e => setTagInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') { e.preventDefault(); commitTag() }
-                    if (e.key === 'Escape') { setTagInput(''); setIsAddingTag(false) }
-                  }}
-                  onBlur={commitTag}
-                  style={{ fontSize: 10, background: 'transparent', border: 'none', borderBottom: '1px solid var(--color-accent)', color: 'var(--color-text-primary)', width: 72, outline: 'none', padding: '1px 0' }}
-                />
+              ? <>
+                  {/* 프리셋 태그 빠른 선택 */}
+                  {tagPresets.filter(p => !localTags.includes(p)).map(p => (
+                    <button
+                      key={p}
+                      onMouseDown={e => {
+                        e.preventDefault()
+                        handleTagChange([...localTags, p])
+                        setIsAddingTag(false)
+                      }}
+                      style={{ fontSize: 10, color: 'var(--color-accent)', background: 'var(--color-bg-active)', border: '1px solid rgba(96,165,250,0.3)', cursor: 'pointer', padding: '1px 5px', borderRadius: 3, transition: 'opacity 0.1s' }}
+                      title={`#${p} 태그 추가`}
+                    >
+                      #{p}
+                    </button>
+                  ))}
+                  <input
+                    autoFocus
+                    value={tagInput}
+                    placeholder="직접 입력…"
+                    onChange={e => setTagInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); commitTag() }
+                      if (e.key === 'Escape') { setTagInput(''); setIsAddingTag(false) }
+                    }}
+                    onBlur={commitTag}
+                    style={{ fontSize: 10, background: 'transparent', border: 'none', borderBottom: '1px solid var(--color-accent)', color: 'var(--color-text-primary)', width: 72, outline: 'none', padding: '1px 0' }}
+                  />
+                </>
               : <button
                   onClick={() => setIsAddingTag(true)}
                   style={{ fontSize: 10, color: 'var(--color-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 3, transition: 'color 0.1s' }}

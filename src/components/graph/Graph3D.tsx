@@ -628,7 +628,7 @@ export default function Graph3D({ width, height }: Props) {
               const newPath = `${vaultPath}${sep}${label}.md`
               window.vaultAPI.saveFile(newPath, `# ${label}\n\n`).then(() => {
                 return window.vaultAPI!.loadFiles(vaultPath)
-              }).then((files) => {
+              }).then(({ files }) => {
                 if (!files) return
                 const docs = parseVaultFiles(files) as LoadedDocument[]
                 setLoadedDocuments(docs)

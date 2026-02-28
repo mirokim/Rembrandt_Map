@@ -135,7 +135,7 @@ export default function FileTree() {
     filtered, grouped, folderGroups, tagGroups, totalCount, isVaultLoaded,
   } = useDocumentFilter()
 
-  const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
+  const { vaultPath, loadedDocuments, setLoadedDocuments, vaultFolders, setVaultFolders } = useVaultStore()
   const { setNodes, setLinks } = useGraphStore()
   const { openInEditor, editingDocId } = useUIStore()
 
@@ -180,29 +180,38 @@ export default function FileTree() {
     groupsToShow.push('unknown' as SpeakerId)
   }
 
-  // All known folders (for folder picker): existing + newly created empty ones
+  // All known folders (for folder picker): vault-scanned + newly created empty ones
   const allFolders = useMemo(() => {
     const known = new Set<string>(['']) // '' = vault root
     folderGroups.forEach(fg => known.add(fg.folderPath))
+    vaultFolders.forEach(f => known.add(f))
     extraFolders.forEach(f => known.add(f))
     return Array.from(known).sort((a, b) => {
       if (a === '') return -1
       if (b === '') return 1
       return a.localeCompare(b)
     })
-  }, [folderGroups, extraFolders])
+  }, [folderGroups, vaultFolders, extraFolders])
+
+  // Empty folders: known from vault + newly created, minus those already in folderGroups
+  const emptyFolders = useMemo(() => {
+    const withDocs = new Set(folderGroups.map(fg => fg.folderPath))
+    const allKnown = new Set([...vaultFolders, ...extraFolders])
+    return Array.from(allKnown).filter(f => !withDocs.has(f)).sort()
+  }, [folderGroups, vaultFolders, extraFolders])
 
   // ── Reload vault helper ────────────────────────────────────────────────────
 
   const reloadVault = useCallback(async () => {
     if (!vaultPath || !window.vaultAPI) return []
-    const files = await window.vaultAPI.loadFiles(vaultPath)
+    const { files, folders } = await window.vaultAPI.loadFiles(vaultPath)
     if (!files) return []
     const docs = parseVaultFiles(files) as LoadedDocument[]
     setLoadedDocuments(docs)
+    setVaultFolders(folders ?? [])
     rebuildGraph(docs)
     return docs
-  }, [vaultPath, setLoadedDocuments, rebuildGraph])
+  }, [vaultPath, setLoadedDocuments, setVaultFolders, rebuildGraph])
 
   // ── Context menu actions ───────────────────────────────────────────────────
 
@@ -446,18 +455,15 @@ export default function FileTree() {
                   onContextMenu={setContextMenu}
                 />
               ))}
-              {extraFolders
-                .filter(f => !folderGroups.some(fg => fg.folderPath === f))
-                .map(f => (
-                  <FolderGroup
-                    key={f}
-                    folderPath={f}
-                    docs={[]}
-                    isOpenOverride={expandOverride}
-                    onContextMenu={setContextMenu}
-                  />
-                ))
-              }
+              {emptyFolders.map(f => (
+                <FolderGroup
+                  key={f}
+                  folderPath={f}
+                  docs={[]}
+                  isOpenOverride={expandOverride}
+                  onContextMenu={setContextMenu}
+                />
+              ))}
             </>
             : tagGroups.map(tg => (
                 <TagGroup

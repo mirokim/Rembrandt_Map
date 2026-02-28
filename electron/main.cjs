@@ -83,21 +83,24 @@ function isInsideVault(vaultPath, filePath) {
 }
 
 /**
- * Recursively collect all .md files in dirPath.
+ * Recursively collect all .md files AND subdirectory paths in dirPath.
  * - Skips hidden dirs/files (starting with '.')
- * - Skips symbolic links
  * - Stops at depth > 10
+ * Returns { files: string[], folders: string[] }
+ *   files:   absolute paths to .md files
+ *   folders: vault-relative paths to subdirectories (e.g. "미니언 시스템")
  */
-function collectMarkdownFiles(vaultPath, dirPath, depth) {
+function collectVaultContents(vaultPath, dirPath, depth) {
   if (depth === undefined) depth = 0
-  if (depth > 10) return []
-  const results = []
+  if (depth > 10) return { files: [], folders: [] }
+  const files = []
+  const folders = []
   let entries
   try {
     entries = fs.readdirSync(dirPath, { withFileTypes: true })
   } catch (err) {
     console.warn('[vault] readdirSync failed for', dirPath, err.message)
-    return []
+    return { files: [], folders: [] }
   }
 
   for (const entry of entries) {
@@ -112,7 +115,7 @@ function collectMarkdownFiles(vaultPath, dirPath, depth) {
     // 1) If name ends with .md → collect as markdown file
     if (entry.name.toLowerCase().endsWith('.md')) {
       if (isInsideVault(vaultPath, fullPath)) {
-        results.push(fullPath)
+        files.push(fullPath)
       }
       continue
     }
@@ -123,12 +126,16 @@ function collectMarkdownFiles(vaultPath, dirPath, depth) {
     // 3) Remaining entries (no extension) — try to recurse as directory.
     //    readdirSync will throw if it's not a readable directory → caught below.
     try {
-      results.push(...collectMarkdownFiles(vaultPath, fullPath, depth + 1))
+      const relPath = path.relative(vaultPath, fullPath).replace(/\\/g, '/')
+      folders.push(relPath)
+      const sub = collectVaultContents(vaultPath, fullPath, depth + 1)
+      files.push(...sub.files)
+      folders.push(...sub.folders)
     } catch {
       // Not a directory or not readable — skip silently
     }
   }
-  return results
+  return { files, folders }
 }
 
 // ── Register IPC handlers ─────────────────────────────────────────────────────
@@ -156,8 +163,8 @@ function registerVaultIpcHandlers() {
     }
 
     currentVaultPath = resolvedVault
-    const filePaths = collectMarkdownFiles(resolvedVault, resolvedVault)
-    console.log(`[vault] ${filePaths.length}개 .md 파일 발견 (${resolvedVault})`)
+    const { files: filePaths, folders: folderRelPaths } = collectVaultContents(resolvedVault, resolvedVault)
+    console.log(`[vault] ${filePaths.length}개 .md 파일, ${folderRelPaths.length}개 폴더 발견 (${resolvedVault})`)
 
     const files = []
     for (const absPath of filePaths) {
@@ -172,7 +179,7 @@ function registerVaultIpcHandlers() {
       }
     }
     console.log(`[vault] ${files.length}/${filePaths.length}개 파일 읽기 성공`)
-    return files
+    return { files, folders: folderRelPaths }
   })
 
   // ── vault:watch-start ────────────────────────────────────────────────────────

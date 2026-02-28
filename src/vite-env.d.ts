@@ -20,7 +20,7 @@ declare global {
     // ── vaultAPI (Phase 6) ────────────────────────────────────────────────────
     vaultAPI?: {
       selectFolder(): Promise<string | null>
-      loadFiles(dirPath: string): Promise<VaultFile[]>
+      loadFiles(dirPath: string): Promise<{ files: VaultFile[]; folders: string[] }>
       watchStart(dirPath: string): Promise<boolean>
       watchStop(): Promise<boolean>
       onChanged(callback: (data: { vaultPath: string }) => void): () => void

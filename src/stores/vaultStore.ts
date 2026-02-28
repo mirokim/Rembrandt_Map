@@ -18,6 +18,8 @@ interface VaultState {
   vaultPath: string | null
   /** Runtime: parsed documents (not persisted) */
   loadedDocuments: LoadedDocument[] | null
+  /** Runtime: all known subfolder paths in the vault (relative to vault root) */
+  vaultFolders: string[]
   /** Runtime: true while loading/parsing files */
   isLoading: boolean
   /** Runtime: last error message, null if none */
@@ -25,6 +27,7 @@ interface VaultState {
 
   setVaultPath: (path: string | null) => void
   setLoadedDocuments: (docs: LoadedDocument[] | null) => void
+  setVaultFolders: (folders: string[]) => void
   setIsLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   /** Clear vault path + documents + error */
@@ -36,15 +39,17 @@ export const useVaultStore = create<VaultState>()(
     (set) => ({
       vaultPath: null,
       loadedDocuments: null,
+      vaultFolders: [],
       isLoading: false,
       error: null,
 
       setVaultPath: (vaultPath) => set({ vaultPath }),
       setLoadedDocuments: (loadedDocuments) => set({ loadedDocuments }),
+      setVaultFolders: (vaultFolders) => set({ vaultFolders }),
       setIsLoading: (isLoading) => set({ isLoading }),
       setError: (error) => set({ error }),
       clearVault: () =>
-        set({ vaultPath: null, loadedDocuments: null, error: null, isLoading: false }),
+        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], error: null, isLoading: false }),
     }),
     {
       name: 'rembrandt-vault',

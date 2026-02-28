@@ -21,7 +21,7 @@ import { tfidfIndex } from '@/lib/graphAnalysis'
 import { buildAdjacencyMap } from '@/lib/graphRAG'
 
 export function useVaultLoader() {
-  const { vaultPath, setLoadedDocuments, setIsLoading, setError } =
+  const { vaultPath, setLoadedDocuments, setVaultFolders, setIsLoading, setError } =
     useVaultStore()
   const { setNodes, setLinks, resetToMock } = useGraphStore()
   const { setIndexing, setChunkCount, setError: setBackendError } = useBackendStore()
@@ -36,8 +36,9 @@ export function useVaultLoader() {
       setIsLoading(true)
       setError(null)
       try {
-        const files = await window.vaultAPI.loadFiles(dirPath)
-        logger.debug(`[vault] ${files?.length ?? 0}개 파일 로드됨 (${dirPath})`)
+        const { files, folders } = await window.vaultAPI.loadFiles(dirPath)
+        logger.debug(`[vault] ${files?.length ?? 0}개 파일, ${folders?.length ?? 0}개 폴더 로드됨 (${dirPath})`)
+        setVaultFolders(folders ?? [])
 
         if (!files || files.length === 0) {
           setLoadedDocuments(null)
@@ -115,7 +116,7 @@ export function useVaultLoader() {
         setIsLoading(false)
       }
     },
-    [setLoadedDocuments, setIsLoading, setError, setNodes, setLinks, resetToMock,
+    [setLoadedDocuments, setVaultFolders, setIsLoading, setError, setNodes, setLinks, resetToMock,
      setIndexing, setChunkCount, setBackendError, loadVaultPersonas, resetVaultPersonas]
   )
 
