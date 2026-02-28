@@ -6,6 +6,8 @@ import { getAutoPaletteColor } from '@/lib/nodeColors'
 export default function TagsTab() {
   const { tagPresets, addTagPreset, removeTagPreset, tagColors, setTagColor } = useSettingsStore()
   const [input, setInput] = useState('')
+  const [isAutoAssigning, setIsAutoAssigning] = useState(false)
+  const [assignProgress, setAssignProgress] = useState(0)
 
   const handleAdd = () => {
     const trimmed = input.trim()
@@ -14,6 +16,16 @@ export default function TagsTab() {
     // 기존에 색상이 지정되지 않은 경우에만 자동 팔레트 색상 배정
     if (!tagColors[trimmed]) setTagColor(trimmed, getAutoPaletteColor(trimmed))
     setInput('')
+  }
+
+  const handleAutoAssign = () => {
+    if (isAutoAssigning) return
+    setIsAutoAssigning(true)
+    setAssignProgress(0)
+    tagPresets.forEach(t => setTagColor(t, getAutoPaletteColor(t)))
+    // 20ms 뒤 트랜지션 시작 (0% 렌더 후 100%로 이동)
+    setTimeout(() => setAssignProgress(100), 20)
+    setTimeout(() => setIsAutoAssigning(false), 700)
   }
 
   return (
@@ -26,23 +38,39 @@ export default function TagsTab() {
           <h3 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>태그 프리셋</h3>
           {tagPresets.length > 0 && (
             <button
-              onClick={() => tagPresets.forEach(t => setTagColor(t, getAutoPaletteColor(t)))}
+              onClick={handleAutoAssign}
+              disabled={isAutoAssigning}
               title="모든 태그 색상을 자동 팔레트로 일괄 배정"
               className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors"
               style={{
                 background: 'var(--color-bg-surface)',
                 border: '1px solid var(--color-border)',
-                color: 'var(--color-text-muted)',
-                cursor: 'pointer',
+                color: isAutoAssigning ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                cursor: isAutoAssigning ? 'default' : 'pointer',
+                opacity: isAutoAssigning ? 0.7 : 1,
               }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.borderColor = 'var(--color-border)' }}
+              onMouseEnter={e => { if (!isAutoAssigning) { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' } }}
+              onMouseLeave={e => { if (!isAutoAssigning) { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
             >
               <Shuffle size={10} />
-              자동 배정
+              {isAutoAssigning ? '배정 중…' : '자동 배정'}
             </button>
           )}
         </div>
+
+        {/* 자동 배정 프로그레스 바 */}
+        {isAutoAssigning && (
+          <div style={{ height: 2, background: 'var(--color-bg-active)', borderRadius: 1, overflow: 'hidden', marginBottom: 8 }}>
+            <div style={{
+              height: '100%',
+              width: `${assignProgress}%`,
+              background: 'var(--color-accent)',
+              borderRadius: 1,
+              transition: 'width 0.55s ease-out',
+            }} />
+          </div>
+        )}
+
         <p className="text-[11px] mb-4" style={{ color: 'var(--color-text-muted)' }}>
           AI 태그 제안 시 이 목록에서만 선택합니다. 왼쪽 색상 점을 클릭해 그래프 노드 색상을 지정하세요.
         </p>
