@@ -49,7 +49,7 @@ export const SPEAKER_CONFIG: Record<SpeakerId, SpeakerMeta> = {
     role: '최적화 · 퍼포먼스 · 안정성 · 기술 구조',
   },
   unknown: {
-    label: '?',
+    label: '미분류',
     color: '#888888',
     hex: 0x888888,
     darkBg: '#1e1e1e',
