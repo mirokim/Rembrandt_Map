@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   SortAsc, SortDesc, ChevronsUpDown, ChevronsDownUp,
-  Clock, Type, FilePlus,
+  Clock, Type, FilePlus, FolderPlus, Folder,
 } from 'lucide-react'
 import { SPEAKER_IDS } from '@/lib/speakerConfig'
 import { useDocumentFilter } from '@/hooks/useDocumentFilter'
@@ -34,6 +35,97 @@ function iconBtn(active = false): React.CSSProperties {
   }
 }
 
+// ── FolderPickerModal ──────────────────────────────────────────────────────────
+
+interface FolderPickerProps {
+  folders: string[]
+  x: number
+  y: number
+  onPick: (folderRelPath: string) => void
+  onClose: () => void
+}
+
+function FolderPickerModal({ folders, x, y, onPick, onClose }: FolderPickerProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', handleDown)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleDown)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [onClose])
+
+  const clampedX = Math.min(x, window.innerWidth - 200 - 8)
+  const clampedY = Math.min(y, window.innerHeight - Math.min(folders.length * 30 + 44, 280) - 8)
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed',
+        top: clampedY,
+        left: clampedX,
+        zIndex: 9999,
+        background: 'var(--color-bg-overlay)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 8,
+        padding: '4px',
+        minWidth: 200,
+        maxHeight: 280,
+        overflowY: 'auto',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+      }}
+    >
+      <div style={{
+        padding: '4px 8px 6px',
+        fontSize: 10,
+        color: 'var(--color-text-muted)',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        marginBottom: 4,
+      }}>
+        이동할 폴더 선택
+      </div>
+      {folders.map(folder => (
+        <button
+          key={folder || '__root__'}
+          onClick={() => { onPick(folder); onClose() }}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            padding: '6px 10px',
+            border: 'none',
+            borderRadius: 5,
+            background: 'transparent',
+            color: 'var(--color-text-secondary)',
+            fontSize: 12,
+            cursor: 'pointer',
+            textAlign: 'left',
+            transition: 'background 0.1s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        >
+          <Folder size={11} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
+          {folder || '/ (루트)'}
+        </button>
+      ))}
+    </div>,
+    document.body
+  )
+}
+
+// ── Main FileTree component ────────────────────────────────────────────────────
+
 export default function FileTree() {
   const {
     search, setSearch,
@@ -58,9 +150,19 @@ export default function FileTree() {
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
+  // Folder picker state — set when user clicks "폴더로 이동"
+  const [moveTarget, setMoveTarget] = useState<{
+    absolutePath: string
+    filename: string
+    x: number
+    y: number
+  } | null>(null)
+
+  // Tracks folders created this session (may be empty on disk — won't appear in folderGroups yet)
+  const [extraFolders, setExtraFolders] = useState<string[]>([])
+
   const handleExpandAll = useCallback(() => setExpandOverride(true), [])
   const handleCollapseAll = useCallback(() => setExpandOverride(false), [])
-  // After an individual group is toggled, clear the override so each group owns its state again
   const handleGroupToggle = useCallback(() => {
     if (expandOverride !== null) setExpandOverride(null)
   }, [expandOverride])
@@ -69,6 +171,30 @@ export default function FileTree() {
   if (grouped['unknown' as SpeakerId]?.length) {
     groupsToShow.push('unknown' as SpeakerId)
   }
+
+  // All known folders (for folder picker): existing + newly created empty ones
+  const allFolders = useMemo(() => {
+    const known = new Set<string>(['']) // '' = vault root
+    folderGroups.forEach(fg => known.add(fg.folderPath))
+    extraFolders.forEach(f => known.add(f))
+    return Array.from(known).sort((a, b) => {
+      if (a === '') return -1
+      if (b === '') return 1
+      return a.localeCompare(b)
+    })
+  }, [folderGroups, extraFolders])
+
+  // ── Reload vault helper ────────────────────────────────────────────────────
+
+  const reloadVault = useCallback(async () => {
+    if (!vaultPath || !window.vaultAPI) return []
+    const files = await window.vaultAPI.loadFiles(vaultPath)
+    if (!files) return []
+    const docs = parseVaultFiles(files) as LoadedDocument[]
+    setLoadedDocuments(docs)
+    rebuildGraph(docs)
+    return docs
+  }, [vaultPath, setLoadedDocuments, rebuildGraph])
 
   // ── Context menu actions ───────────────────────────────────────────────────
 
@@ -105,29 +231,21 @@ export default function FileTree() {
       : `${newName.trim()}.md`
     if (newFilename === filename) return
 
-    // 이름 변경 전에 현재 편집 중인 파일인지 확인
     const oldDoc = loadedDocuments?.find(d => (d as LoadedDocument).absolutePath === absolutePath)
     const wasEditing = Boolean(oldDoc && editingDocId === oldDoc.id)
 
     try {
       await window.vaultAPI?.renameFile(absolutePath, newFilename)
       if (vaultPath && window.vaultAPI) {
-        const files = await window.vaultAPI.loadFiles(vaultPath)
-        if (files) {
-          const docs = parseVaultFiles(files) as LoadedDocument[]
-          setLoadedDocuments(docs)
-          rebuildGraph(docs)
-
-          // 편집 중이던 파일이면 새 ID로 에디터 업데이트
-          if (wasEditing) {
-            const sep = absolutePath.includes('\\') ? '\\' : '/'
-            const dir = absolutePath.replace(/[\\/][^\\/]+$/, '')
-            const newAbsPath = `${dir}${sep}${newFilename}`
-            const newDoc = docs.find(d =>
-              d.absolutePath.replace(/\\/g, '/') === newAbsPath.replace(/\\/g, '/')
-            )
-            if (newDoc) openInEditor(newDoc.id)
-          }
+        const docs = await reloadVault()
+        if (wasEditing) {
+          const sep = absolutePath.includes('\\') ? '\\' : '/'
+          const dir = absolutePath.replace(/[\\/][^\\/]+$/, '')
+          const newAbsPath = `${dir}${sep}${newFilename}`
+          const newDoc = docs.find(d =>
+            d.absolutePath.replace(/\\/g, '/') === newAbsPath.replace(/\\/g, '/')
+          )
+          if (newDoc) openInEditor(newDoc.id)
         }
       }
     } catch (e) {
@@ -140,21 +258,69 @@ export default function FileTree() {
     if (!confirmed) return
     try {
       await window.vaultAPI?.deleteFile(absolutePath)
-      if (vaultPath && window.vaultAPI) {
-        const files = await window.vaultAPI.loadFiles(vaultPath)
-        const docs = (files ? parseVaultFiles(files) : []) as LoadedDocument[]
-        setLoadedDocuments(docs)
-        rebuildGraph(docs)
-      }
+      await reloadVault()
     } catch (e) {
       console.error('[FileTree] delete failed:', e)
     }
   }
 
+  // ── Create folder ──────────────────────────────────────────────────────────
+
+  const handleCreateFolder = async () => {
+    if (!vaultPath || !window.vaultAPI?.createFolder) return
+    const name = window.prompt('새 폴더 이름 (중첩 가능: 부모/자식):')
+    if (!name || !name.trim()) return
+    const sep = vaultPath.includes('\\') ? '\\' : '/'
+    const folderRelPath = name.trim().replace(/[/\\]/g, sep)
+    const folderAbsPath = `${vaultPath}${sep}${folderRelPath}`
+    try {
+      await window.vaultAPI.createFolder(folderAbsPath)
+      setExtraFolders(prev => [...prev, folderRelPath.replace(/\\/g, '/')])
+    } catch (e) {
+      console.error('[FileTree] create folder failed:', e)
+    }
+  }
+
+  // ── Move file to folder ────────────────────────────────────────────────────
+
+  const handleMoveRequest = (absolutePath: string, filename: string, x: number, y: number) => {
+    setMoveTarget({ absolutePath, filename, x, y })
+  }
+
+  const handleMoveTo = async (destFolderRelPath: string) => {
+    if (!moveTarget || !vaultPath || !window.vaultAPI?.moveFile) return
+    const { absolutePath, filename } = moveTarget
+    setMoveTarget(null)
+
+    const oldDoc = loadedDocuments?.find(d => (d as LoadedDocument).absolutePath === absolutePath)
+    const wasEditing = Boolean(oldDoc && editingDocId === oldDoc.id)
+
+    const sep = vaultPath.includes('\\') ? '\\' : '/'
+    const destAbsPath = destFolderRelPath
+      ? `${vaultPath}${sep}${destFolderRelPath.replace(/[/\\]/g, sep)}`
+      : vaultPath
+
+    try {
+      await window.vaultAPI.moveFile(absolutePath, destAbsPath)
+      const docs = await reloadVault()
+
+      if (wasEditing) {
+        const newRelPath = (destFolderRelPath ? `${destFolderRelPath}/` : '') + filename
+        const newDoc = docs.find(d =>
+          d.absolutePath.replace(/\\/g, '/').endsWith(newRelPath.replace(/\\/g, '/'))
+        )
+        if (newDoc) openInEditor(newDoc.id)
+      }
+    } catch (e) {
+      console.error('[FileTree] move failed:', e)
+    }
+  }
+
+  // ── New document ───────────────────────────────────────────────────────────
+
   const handleNewDocument = async () => {
     if (!vaultPath || !window.vaultAPI) return
     const sep = vaultPath.includes('\\') ? '\\' : '/'
-    // Find a unique filename: 무제.md, 무제 2.md, 무제 3.md ...
     const existing = new Set(
       (loadedDocuments ?? []).map(d => (d as LoadedDocument).absolutePath.replace(/\\/g, '/'))
     )
@@ -168,16 +334,11 @@ export default function FileTree() {
     }
     try {
       await window.vaultAPI.saveFile(newPath, `# ${name}\n\n`)
-      const files = await window.vaultAPI.loadFiles(vaultPath)
-      if (files) {
-        const docs = parseVaultFiles(files) as LoadedDocument[]
-        setLoadedDocuments(docs)
-        rebuildGraph(docs)
-        const newDoc = docs.find(d =>
-          d.absolutePath.replace(/\\/g, '/') === newPath.replace(/\\/g, '/')
-        )
-        if (newDoc) openInEditor(newDoc.id)
-      }
+      const docs = await reloadVault()
+      const newDoc = docs.find(d =>
+        d.absolutePath.replace(/\\/g, '/') === newPath.replace(/\\/g, '/')
+      )
+      if (newDoc) openInEditor(newDoc.id)
     } catch (e) {
       console.error('[FileTree] new document failed:', e)
     }
@@ -230,6 +391,15 @@ export default function FileTree() {
         </button>
 
         <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
+
+        <button
+          style={iconBtn()}
+          title={vaultPath ? '새 폴더 만들기' : '볼트를 먼저 선택하세요'}
+          onClick={handleCreateFolder}
+          disabled={!vaultPath}
+        >
+          <FolderPlus size={11} />
+        </button>
 
         <button
           style={iconBtn()}
@@ -291,6 +461,18 @@ export default function FileTree() {
           onBookmark={handleBookmark}
           onRename={handleRename}
           onDelete={handleDelete}
+          onMove={handleMoveRequest}
+        />
+      )}
+
+      {/* ── Folder picker modal (portal) ── */}
+      {moveTarget && (
+        <FolderPickerModal
+          folders={allFolders}
+          x={moveTarget.x}
+          y={moveTarget.y}
+          onPick={handleMoveTo}
+          onClose={() => setMoveTarget(null)}
         />
       )}
     </div>

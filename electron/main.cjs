@@ -254,6 +254,40 @@ function registerVaultIpcHandlers() {
     if (!fs.existsSync(resolved)) return null
     return fs.readFileSync(resolved, 'utf-8')
   })
+
+  // ── vault:create-folder ───────────────────────────────────────────────────────
+  ipcMain.handle('vault:create-folder', (_event, folderPath) => {
+    if (!folderPath || typeof folderPath !== 'string') throw new Error('Invalid folder path')
+    const resolved = path.resolve(folderPath)
+    if (currentVaultPath && !isInsideVault(currentVaultPath, resolved)) {
+      throw new Error(`보안 오류: 볼트 외부에 폴더를 만들 수 없습니다 (${resolved})`)
+    }
+    fs.mkdirSync(resolved, { recursive: true })
+    return { success: true, path: resolved }
+  })
+
+  // ── vault:move-file ───────────────────────────────────────────────────────────
+  ipcMain.handle('vault:move-file', (_event, absolutePath, destFolderPath) => {
+    if (!absolutePath || typeof absolutePath !== 'string') throw new Error('Invalid file path')
+    if (!destFolderPath || typeof destFolderPath !== 'string') throw new Error('Invalid destination folder')
+    const resolvedSrc = path.resolve(absolutePath)
+    const resolvedDest = path.resolve(destFolderPath)
+    if (currentVaultPath && !isInsideVault(currentVaultPath, resolvedSrc)) {
+      throw new Error(`보안 오류: 볼트 외부 파일은 이동할 수 없습니다 (${resolvedSrc})`)
+    }
+    if (currentVaultPath) {
+      const isVaultRoot = resolvedDest === path.resolve(currentVaultPath)
+      if (!isVaultRoot && !isInsideVault(currentVaultPath, resolvedDest)) {
+        throw new Error(`보안 오류: 볼트 외부로 파일을 이동할 수 없습니다 (${resolvedDest})`)
+      }
+    }
+    if (!fs.existsSync(resolvedSrc)) throw new Error(`파일이 존재하지 않습니다: ${resolvedSrc}`)
+    fs.mkdirSync(resolvedDest, { recursive: true })
+    const filename = path.basename(resolvedSrc)
+    const newPath = path.join(resolvedDest, filename)
+    if (resolvedSrc !== newPath) fs.renameSync(resolvedSrc, newPath)
+    return { success: true, newPath }
+  })
 }
 
 function registerBackendIpcHandlers() {

@@ -7,6 +7,7 @@ import {
   History,
   Pencil,
   Trash2,
+  FolderInput,
 } from 'lucide-react'
 
 export interface ContextMenuState {
@@ -25,6 +26,7 @@ interface ContextMenuProps {
   onBookmark: (docId: string) => void
   onRename: (absolutePath: string, filename: string) => void
   onDelete: (absolutePath: string, filename: string) => void
+  onMove?: (absolutePath: string, filename: string, x: number, y: number) => void
 }
 
 interface MenuItem {
@@ -44,6 +46,7 @@ export default function ContextMenu({
   onBookmark,
   onRename,
   onDelete,
+  onMove,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -65,7 +68,7 @@ export default function ContextMenu({
 
   // Clamp to viewport
   const menuWidth = 180
-  const menuHeight = 260
+  const menuHeight = 290
   const x = Math.min(menu.x, window.innerWidth - menuWidth - 8)
   const y = Math.min(menu.y, window.innerHeight - menuHeight - 8)
 
@@ -91,6 +94,11 @@ export default function ContextMenu({
       onClick: () => onClose(),
       disabled: true,
       divider: true,
+    },
+    {
+      icon: <FolderInput size={12} />,
+      label: '폴더로 이동',
+      onClick: () => { onMove?.(menu.absolutePath, menu.filename, menu.x, menu.y); onClose() },
     },
     {
       icon: <Pencil size={12} />,

@@ -41,6 +41,13 @@ contextBridge.exposeInMainWorld('vaultAPI', {
   /** Read a single file by absolute path; returns null if not found */
   readFile: (filePath) => ipcRenderer.invoke('vault:read-file', filePath),
 
+  /** Create a directory (and any missing parents) inside the vault */
+  createFolder: (folderPath) => ipcRenderer.invoke('vault:create-folder', folderPath),
+
+  /** Move a file to a different folder inside the vault */
+  moveFile: (absolutePath, destFolderPath) =>
+    ipcRenderer.invoke('vault:move-file', absolutePath, destFolderPath),
+
   /**
    * Subscribe to vault file-change events.
    * Returns a cleanup function that removes the listener.
