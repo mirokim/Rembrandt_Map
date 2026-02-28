@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react'
-import { Tag, Plus, X, Shuffle } from 'lucide-react'
+import { Tag, Plus, X, Wand2, Loader2 } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useVaultStore } from '@/stores/vaultStore'
+import { useVaultLoader } from '@/hooks/useVaultLoader'
 import { getAutoPaletteColor } from '@/lib/nodeColors'
+import type { BulkTagProgress } from '@/services/tagService'
 
 export default function TagsTab() {
   const { tagPresets, addTagPreset, removeTagPreset, tagColors, setTagColor } = useSettingsStore()
+  const { loadedDocuments } = useVaultStore()
+  const { vaultPath, loadVault } = useVaultLoader()
   const [input, setInput] = useState('')
-  const [isAutoAssigning, setIsAutoAssigning] = useState(false)
-  const [assignProgress, setAssignProgress] = useState(0)
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<BulkTagProgress | null>(null)
+  const [bulkDoneMsg, setBulkDoneMsg] = useState<string | null>(null)
 
   // 기존 프리셋 중 색상이 없는 것들 마운트 시 자동 배정
   useEffect(() => {
@@ -22,20 +28,47 @@ export default function TagsTab() {
     const trimmed = input.trim()
     if (!trimmed) return
     addTagPreset(trimmed)
-    // 기존에 색상이 지정되지 않은 경우에만 자동 팔레트 색상 배정
     if (!tagColors[trimmed]) setTagColor(trimmed, getAutoPaletteColor(trimmed))
     setInput('')
   }
 
-  const handleAutoAssign = () => {
-    if (isAutoAssigning) return
-    setIsAutoAssigning(true)
-    setAssignProgress(0)
-    tagPresets.forEach(t => setTagColor(t, getAutoPaletteColor(t)))
-    // 20ms 뒤 트랜지션 시작 (0% 렌더 후 100%로 이동)
-    setTimeout(() => setAssignProgress(100), 20)
-    setTimeout(() => setIsAutoAssigning(false), 700)
+  const handleBulkAssign = async () => {
+    if (isBulkAssigning) return
+    if (!loadedDocuments?.length) {
+      setBulkDoneMsg('볼트를 먼저 로드해주세요')
+      setTimeout(() => setBulkDoneMsg(null), 3000)
+      return
+    }
+    if (tagPresets.length === 0) {
+      setBulkDoneMsg('태그 프리셋을 먼저 추가해주세요')
+      setTimeout(() => setBulkDoneMsg(null), 3000)
+      return
+    }
+
+    setIsBulkAssigning(true)
+    setBulkDoneMsg(null)
+    setBulkProgress({ current: 0, total: loadedDocuments.length, docName: '준비 중…', done: false })
+
+    try {
+      const { bulkAssignTagsToAllDocs } = await import('@/services/tagService')
+      const { saved, skipped } = await bulkAssignTagsToAllDocs(
+        loadedDocuments,
+        (p) => { if (!p.done) setBulkProgress(p) },
+      )
+      // 볼트 리로드로 태그 반영
+      if (vaultPath) await loadVault(vaultPath)
+      setBulkDoneMsg(`완료: ${saved}개 문서 태그 지정, ${skipped}개 건너뜀`)
+      setTimeout(() => setBulkDoneMsg(null), 6000)
+    } catch {
+      setBulkDoneMsg('오류가 발생했습니다')
+      setTimeout(() => setBulkDoneMsg(null), 3000)
+    } finally {
+      setIsBulkAssigning(false)
+      setBulkProgress(null)
+    }
   }
+
+  const docCount = loadedDocuments?.length ?? 0
 
   return (
     <div className="flex flex-col gap-7">
@@ -47,37 +80,53 @@ export default function TagsTab() {
           <h3 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>태그 프리셋</h3>
           {tagPresets.length > 0 && (
             <button
-              onClick={handleAutoAssign}
-              disabled={isAutoAssigning}
-              title="모든 태그 색상을 자동 팔레트로 일괄 배정"
+              onClick={handleBulkAssign}
+              disabled={isBulkAssigning}
+              title={docCount > 0
+                ? `AI로 vault 전체 ${docCount}개 문서에 태그를 자동 지정합니다`
+                : '볼트를 먼저 로드해주세요'}
               className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors"
               style={{
                 background: 'var(--color-bg-surface)',
                 border: '1px solid var(--color-border)',
-                color: isAutoAssigning ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                cursor: isAutoAssigning ? 'default' : 'pointer',
-                opacity: isAutoAssigning ? 0.7 : 1,
+                color: isBulkAssigning ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                cursor: isBulkAssigning ? 'default' : 'pointer',
+                opacity: isBulkAssigning ? 0.8 : 1,
               }}
-              onMouseEnter={e => { if (!isAutoAssigning) { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' } }}
-              onMouseLeave={e => { if (!isAutoAssigning) { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
+              onMouseEnter={e => { if (!isBulkAssigning) { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' } }}
+              onMouseLeave={e => { if (!isBulkAssigning) { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
             >
-              <Shuffle size={10} />
-              {isAutoAssigning ? '배정 중…' : '자동 배정'}
+              {isBulkAssigning
+                ? <Loader2 size={10} className="animate-spin" />
+                : <Wand2 size={10} />}
+              {isBulkAssigning ? '지정 중…' : '자동 배정'}
             </button>
           )}
         </div>
 
-        {/* 자동 배정 프로그레스 바 */}
-        {isAutoAssigning && (
-          <div style={{ height: 2, background: 'var(--color-bg-active)', borderRadius: 1, overflow: 'hidden', marginBottom: 8 }}>
-            <div style={{
-              height: '100%',
-              width: `${assignProgress}%`,
-              background: 'var(--color-accent)',
-              borderRadius: 1,
-              transition: 'width 0.55s ease-out',
-            }} />
+        {/* 진행 상태 */}
+        {isBulkAssigning && bulkProgress && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ height: 2, background: 'var(--color-bg-active)', borderRadius: 1, overflow: 'hidden', marginBottom: 5 }}>
+              <div style={{
+                height: '100%',
+                width: `${Math.round((bulkProgress.current / bulkProgress.total) * 100)}%`,
+                background: 'var(--color-accent)',
+                borderRadius: 1,
+                transition: 'width 0.2s ease-out',
+              }} />
+            </div>
+            <p style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+              {bulkProgress.current}/{bulkProgress.total} — {bulkProgress.docName}
+            </p>
           </div>
+        )}
+
+        {/* 완료/오류 메시지 */}
+        {bulkDoneMsg && (
+          <p style={{ fontSize: 11, color: 'var(--color-accent)', marginBottom: 6 }}>
+            {bulkDoneMsg}
+          </p>
         )}
 
         <p className="text-[11px] mb-4" style={{ color: 'var(--color-text-muted)' }}>

@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, Tag } from 'lucide-react'
 import type { MockDocument, LoadedDocument } from '@/types'
 import FileTreeItem from './FileTreeItem'
 import type { ContextMenuState } from './ContextMenu'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 interface TagGroupProps {
   tag: string  // '' = 태그 없음
@@ -19,6 +20,8 @@ export default function TagGroup({
   onContextMenu,
 }: TagGroupProps) {
   const [localOpen, setLocalOpen] = useState(true)
+  const { tagColors } = useSettingsStore()
+  const customColor = tag !== '' ? (tagColors[tag] ?? undefined) : undefined
 
   // Sync local state when override changes
   useEffect(() => {
@@ -49,12 +52,12 @@ export default function TagGroup({
           className="flex items-center justify-center w-4 h-4 rounded"
           style={{ background: 'var(--color-bg-active)' }}
         >
-          <Tag size={9} style={{ color: tag === '' ? 'var(--color-text-muted)' : 'var(--color-accent)' }} />
+          <Tag size={9} style={{ color: tag === '' ? 'var(--color-text-muted)' : (customColor ?? 'var(--color-accent)') }} />
         </span>
 
         <span
           className="flex-1 text-left text-[11px]"
-          style={{ color: tag === '' ? 'var(--color-text-muted)' : undefined }}
+          style={{ color: tag === '' ? 'var(--color-text-muted)' : (customColor ?? undefined) }}
         >
           {displayName}
         </span>

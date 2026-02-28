@@ -8,6 +8,8 @@
  * 지원 provider: anthropic, openai, gemini, grok
  */
 
+import matter from 'gray-matter'
+import type { LoadedDocument } from '@/types'
 import { useSettingsStore, getApiKey } from '@/stores/settingsStore'
 import { getProviderForModel } from '@/lib/modelConfig'
 
@@ -97,4 +99,60 @@ ${contentPreview}
   } catch {
     return []
   }
+}
+
+// YAML frontmatter의 tags 필드를 업데이트한 전체 문자열을 반환한다.
+function applyTagsToContent(rawContent: string, newTags: string[]): string {
+  const trimmed = rawContent.trimStart()
+  if (!trimmed.startsWith('---')) {
+    if (newTags.length === 0) return rawContent
+    return `---\ntags: [${newTags.join(', ')}]\n---\n\n${rawContent}`
+  }
+  const parsed = matter(rawContent)
+  if (newTags.length > 0) parsed.data.tags = newTags
+  else delete parsed.data.tags
+  return matter.stringify(parsed.content, parsed.data)
+}
+
+export interface BulkTagProgress {
+  current: number
+  total: number
+  docName: string
+  done: boolean
+}
+
+/**
+ * vault 전체 문서에 AI 태그를 일괄 지정한다.
+ * 각 문서마다 suggestTagsForDoc 호출 → 태그가 있으면 frontmatter 업데이트 후 저장.
+ * 태그가 없거나 오류 시 해당 문서는 건너뜀 (기존 태그 보존).
+ */
+export async function bulkAssignTagsToAllDocs(
+  docs: LoadedDocument[],
+  onProgress: (p: BulkTagProgress) => void,
+): Promise<{ saved: number; skipped: number }> {
+  if (!docs.length) return { saved: 0, skipped: 0 }
+
+  let saved = 0
+  let skipped = 0
+
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i]
+    onProgress({ current: i + 1, total: docs.length, docName: doc.filename, done: false })
+
+    try {
+      const tags = await suggestTagsForDoc(doc.filename, doc.rawContent)
+      if (tags.length > 0 && window.vaultAPI) {
+        const newRaw = applyTagsToContent(doc.rawContent, tags)
+        await window.vaultAPI.saveFile(doc.absolutePath, newRaw)
+        saved++
+      } else {
+        skipped++
+      }
+    } catch {
+      skipped++
+    }
+  }
+
+  onProgress({ current: docs.length, total: docs.length, docName: '', done: true })
+  return { saved, skipped }
 }

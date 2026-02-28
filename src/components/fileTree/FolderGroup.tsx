@@ -55,7 +55,7 @@ export default function FolderGroup({
           <Folder size={9} style={{ color: customColor ?? 'var(--color-accent)' }} />
         </span>
 
-        <span className="flex-1 text-left text-[11px]">{displayName}</span>
+        <span className="flex-1 text-left text-[11px]" style={{ color: customColor ?? undefined }}>{displayName}</span>
 
         <span style={{ color: 'var(--color-text-muted)' }} className="text-[10px]">
           {docs.length}
