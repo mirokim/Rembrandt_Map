@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import {
   SortAsc, SortDesc, ChevronsUpDown, ChevronsDownUp,
-  Clock, Type, FilePlus, FolderPlus, Folder,
+  Clock, Type, FilePlus, FolderPlus, Folder, Tag,
 } from 'lucide-react'
 import { SPEAKER_IDS } from '@/lib/speakerConfig'
 import { useDocumentFilter } from '@/hooks/useDocumentFilter'
@@ -14,6 +14,7 @@ import { buildGraph } from '@/lib/graphBuilder'
 import SearchBar from './SearchBar'
 import SpeakerGroup from './SpeakerGroup'
 import FolderGroup from './FolderGroup'
+import TagGroup from './TagGroup'
 import ContextMenu from './ContextMenu'
 import type { SpeakerId, LoadedDocument } from '@/types'
 import type { ContextMenuState } from './ContextMenu'
@@ -131,7 +132,7 @@ export default function FileTree() {
     search, setSearch,
     sortBy, setSortBy,
     sortDir, toggleSortDir,
-    filtered, grouped, folderGroups, totalCount, isVaultLoaded,
+    filtered, grouped, folderGroups, tagGroups, totalCount, isVaultLoaded,
   } = useDocumentFilter()
 
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
@@ -143,6 +144,9 @@ export default function FileTree() {
     setNodes(nodes)
     setLinks(links)
   }, [setNodes, setLinks])
+
+  // Group mode: 'folder' (default) or 'tag' (vault mode only)
+  const [groupMode, setGroupMode] = useState<'folder' | 'tag'>('folder')
 
   // Expand/collapse all state: null = each folder uses its own local state
   const [expandOverride, setExpandOverride] = useState<boolean | null>(null)
@@ -393,6 +397,26 @@ export default function FileTree() {
         <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
 
         <button
+          style={iconBtn(isVaultLoaded && groupMode === 'folder')}
+          title="폴더별 보기"
+          onClick={() => setGroupMode('folder')}
+          disabled={!isVaultLoaded}
+        >
+          <Folder size={11} />
+        </button>
+
+        <button
+          style={iconBtn(isVaultLoaded && groupMode === 'tag')}
+          title="태그별 보기"
+          onClick={() => setGroupMode('tag')}
+          disabled={!isVaultLoaded}
+        >
+          <Tag size={11} />
+        </button>
+
+        <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
+
+        <button
           style={iconBtn()}
           title={vaultPath ? '새 폴더 만들기' : '볼트를 먼저 선택하세요'}
           onClick={handleCreateFolder}
@@ -416,15 +440,25 @@ export default function FileTree() {
       {/* ── Document groups ── */}
       <div className="flex-1 overflow-y-auto py-1" onClick={handleGroupToggle}>
         {isVaultLoaded
-          ? folderGroups.map(fg => (
-              <FolderGroup
-                key={fg.folderPath}
-                folderPath={fg.folderPath}
-                docs={fg.docs}
-                isOpenOverride={expandOverride}
-                onContextMenu={setContextMenu}
-              />
-            ))
+          ? groupMode === 'folder'
+            ? folderGroups.map(fg => (
+                <FolderGroup
+                  key={fg.folderPath}
+                  folderPath={fg.folderPath}
+                  docs={fg.docs}
+                  isOpenOverride={expandOverride}
+                  onContextMenu={setContextMenu}
+                />
+              ))
+            : tagGroups.map(tg => (
+                <TagGroup
+                  key={tg.tag || '__untagged__'}
+                  tag={tg.tag}
+                  docs={tg.docs}
+                  isOpenOverride={expandOverride}
+                  onContextMenu={setContextMenu}
+                />
+              ))
           : groupsToShow.map(id => (
               <SpeakerGroup
                 key={id}

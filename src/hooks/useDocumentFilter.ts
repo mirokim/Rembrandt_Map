@@ -25,6 +25,11 @@ export interface FolderGroup {
   docs: AnyDoc[]
 }
 
+export interface TagGroup {
+  tag: string  // '' = 태그 없음
+  docs: AnyDoc[]
+}
+
 function sortDocs(docs: AnyDoc[], sortBy: SortBy, sortDir: SortDir): AnyDoc[] {
   return [...docs].sort((a, b) => {
     let cmp = 0
@@ -98,6 +103,33 @@ export function useDocumentFilter() {
       }))
   }, [filtered, isVaultLoaded, sortBy, sortDir])
 
+  // Tag-based grouping (vault mode)
+  const tagGroups = useMemo((): TagGroup[] => {
+    if (!isVaultLoaded) return []
+
+    const map = new Map<string, AnyDoc[]>()
+    for (const doc of filtered) {
+      if (doc.tags.length === 0) {
+        if (!map.has('')) map.set('', [])
+        map.get('')!.push(doc)
+      } else {
+        for (const tag of doc.tags) {
+          if (!map.has(tag)) map.set(tag, [])
+          map.get(tag)!.push(doc)
+        }
+      }
+    }
+
+    // Sort: alphabetical, '' (untagged) last
+    return Array.from(map.entries())
+      .sort(([a], [b]) => {
+        if (a === '' && b !== '') return 1
+        if (a !== '' && b === '') return -1
+        return a.localeCompare(b)
+      })
+      .map(([tag, docs]) => ({ tag, docs: sortDocs(docs, sortBy, sortDir) }))
+  }, [filtered, isVaultLoaded, sortBy, sortDir])
+
   const toggleSortDir = () => setSortDir(d => d === 'asc' ? 'desc' : 'asc')
 
   return {
@@ -110,6 +142,7 @@ export function useDocumentFilter() {
     filtered,
     grouped,
     folderGroups,
+    tagGroups,
     totalCount: allDocuments.length,
     isVaultLoaded,
   }
