@@ -74,8 +74,8 @@ export function buildGraphLinks(
   for (const doc of documents) {
     for (const section of doc.sections) {
       for (const rawLink of section.wikiLinks) {
-        // Handle [[target|display]] alias syntax
-        const target = rawLink.split('|')[0].trim()
+        // Handle [[target|display]] alias syntax and [[target#heading]] anchors
+        const target = rawLink.split('|')[0].split('#')[0].trim()
         if (!target) continue
 
         let targetDocId: string | undefined

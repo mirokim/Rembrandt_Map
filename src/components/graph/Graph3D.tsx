@@ -4,8 +4,14 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { useVaultStore } from '@/stores/vaultStore'
+import { parseVaultFiles } from '@/lib/markdownParser'
+import { buildGraph } from '@/lib/graphBuilder'
+import type { LoadedDocument } from '@/types'
 import { useGraphSimulation3D, type SimNode3D, type SimLink3D } from '@/hooks/useGraphSimulation3D'
 import { useFrameRate } from '@/hooks/useFrameRate'
+import { graphCallbacks } from '@/lib/graphEvents'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
 import type { GraphLink } from '@/types'
@@ -53,8 +59,10 @@ export default function Graph3D({ width, height }: Props) {
   // Adjacency map: nodeId → Set<linkIndex>
   const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
 
-  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+  const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
+  const colorRules = useSettingsStore(s => s.colorRules)
 
   // Build color lookup map whenever nodes or color mode changes
   const nodeColorMap = useMemo(
@@ -75,7 +83,7 @@ export default function Graph3D({ width, height }: Props) {
       const mesh = meshMap.get(node.id)
       if (mesh) {
         const mat = mesh.material as THREE.MeshBasicMaterial
-        mat.color.set(getNodeColor(node, nodeColorMode, nodeColorMap))
+        mat.color.set(getNodeColor(node, nodeColorMode, nodeColorMap, colorRules))
       }
     })
   }, [nodes, nodeColorMode, nodeColorMap])
@@ -176,10 +184,15 @@ export default function Graph3D({ width, height }: Props) {
     controls.addEventListener('start', onInteractStart)
     controlsRef.current = controls
 
+    // Register camera reset callback for PhysicsControls
+    graphCallbacks.resetCamera = () => {
+      controls.reset()
+    }
+
     // ── Nodes ────────────────────────────────────────────────────────────────
     const geo = new THREE.SphereGeometry(NODE_RADIUS, 16, 12)
     nodes.forEach(node => {
-      const color = getNodeColor(node, nodeColorMode, nodeColorMap)
+      const color = getNodeColor(node, nodeColorMode, nodeColorMap, colorRules)
       // transparent: true so we can dim opacity for non-neighbors
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 })
       const mesh = new THREE.Mesh(geo, mat)
@@ -303,6 +316,7 @@ export default function Graph3D({ width, height }: Props) {
     animate()
 
     return () => {
+      graphCallbacks.resetCamera = null
       cancelAnimationFrame(rafRef.current)
       controls.removeEventListener('start', onInteractStart)
       controls.dispose()
@@ -594,8 +608,32 @@ export default function Graph3D({ width, height }: Props) {
           const docId = mesh.userData.docId as string
           setSelectedNode(draggedNodeId)
           setSelectedDoc(docId)
-          // Phantom nodes (_phantom_*) have no real file — don't open editor
-          if (!docId.startsWith('_phantom_')) {
+
+          if (docId.startsWith('_phantom_')) {
+            // Phantom node: create the file and open in editor
+            const node = nodes.find(n => n.id === docId)
+            const label = node?.label ?? docId.replace('_phantom_', '')
+            if (vaultPath && window.vaultAPI) {
+              const sep = vaultPath.includes('\\') ? '\\' : '/'
+              const newPath = `${vaultPath}${sep}${label}.md`
+              window.vaultAPI.saveFile(newPath, `# ${label}\n\n`).then(() => {
+                return window.vaultAPI!.loadFiles(vaultPath)
+              }).then((files) => {
+                if (!files) return
+                const docs = parseVaultFiles(files) as LoadedDocument[]
+                setLoadedDocuments(docs)
+                const { nodes: newNodes, links: newLinks } = buildGraph(docs)
+                setNodes(newNodes)
+                setLinks(newLinks)
+                const newDoc = docs.find(d =>
+                  d.absolutePath.replace(/\\/g, '/') === newPath.replace(/\\/g, '/')
+                )
+                if (newDoc) openInEditor(newDoc.id)
+              }).catch((e: unknown) => {
+                console.error('[Graph3D] phantom node file creation failed:', e)
+              })
+            }
+          } else {
             openInEditor(docId)
           }
         }
@@ -606,7 +644,8 @@ export default function Graph3D({ width, height }: Props) {
     setHoveredNode(null)
     lastHoveredRef.current = null
     setTooltip(null)
-  }, [simNodesRef, simRef, setSelectedNode, setSelectedDoc, setCenterTab, setHoveredNode, openInEditor])
+  }, [simNodesRef, simRef, setSelectedNode, setSelectedDoc, setCenterTab, setHoveredNode,
+      openInEditor, nodes, vaultPath, loadedDocuments, setLoadedDocuments, setNodes, setLinks])
 
   // ── Mouse leave: clear hover when cursor leaves the 3D area ──────────────
   const handleMouseLeave = useCallback(() => {

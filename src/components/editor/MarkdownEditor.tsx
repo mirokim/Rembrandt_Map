@@ -19,11 +19,11 @@ import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
 import { tags } from '@lezer/highlight'
-import { ArrowLeft, Save, CheckCircle, AlertCircle, X, Lock, Unlock } from 'lucide-react'
+import { ArrowLeft, Save, CheckCircle, AlertCircle, X, Lock, Unlock, Pencil } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
-import { parseMarkdownFile } from '@/lib/markdownParser'
+import { parseMarkdownFile, parseVaultFiles } from '@/lib/markdownParser'
 import { buildGraph } from '@/lib/graphBuilder'
 import { MOCK_DOCUMENTS } from '@/data/mockDocuments'
 import type { LoadedDocument, MockDocument } from '@/types'
@@ -112,6 +112,64 @@ function buildWikiLinkPlugin(onLinkClick: (slug: string) => void) {
   )
 }
 
+// ── ==Highlight== 데코레이터 ───────────────────────────────────────────────────
+
+function buildHighlightPlugin() {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
+      constructor(view: EditorView) { this.decorations = this.compute(view) }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.selectionSet || u.viewportChanged)
+          this.decorations = this.compute(u.view)
+      }
+      compute(view: EditorView): DecorationSet {
+        const { state } = view
+        const decs: Range<Decoration>[] = []
+        const re = /==([^=\n]+)==/g
+        for (const { from, to } of view.visibleRanges) {
+          const text = state.doc.sliceString(from, to)
+          let m
+          while ((m = re.exec(text)) !== null) {
+            decs.push(Decoration.mark({ class: 'cm-highlight-mark' }).range(from + m.index, from + m.index + m[0].length))
+          }
+        }
+        return Decoration.set(decs.sort((a, b) => a.from - b.from))
+      }
+    },
+    { decorations: v => v.decorations },
+  )
+}
+
+// ── %% 주석 %% 데코레이터 ──────────────────────────────────────────────────────
+
+function buildCommentPlugin() {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
+      constructor(view: EditorView) { this.decorations = this.compute(view) }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.selectionSet || u.viewportChanged)
+          this.decorations = this.compute(u.view)
+      }
+      compute(view: EditorView): DecorationSet {
+        const { state } = view
+        const decs: Range<Decoration>[] = []
+        const re = /%%[\s\S]*?%%/g
+        for (const { from, to } of view.visibleRanges) {
+          const text = state.doc.sliceString(from, to)
+          let m
+          while ((m = re.exec(text)) !== null) {
+            decs.push(Decoration.mark({ class: 'cm-comment-mark' }).range(from + m.index, from + m.index + m[0].length))
+          }
+        }
+        return Decoration.set(decs.sort((a, b) => a.from - b.from))
+      }
+    },
+    { decorations: v => v.decorations },
+  )
+}
+
 // ── Markdown Syntax Highlighting ─────────────────────────────────────────────
 
 const markdownHighlight = HighlightStyle.define([
@@ -121,6 +179,7 @@ const markdownHighlight = HighlightStyle.define([
   { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: '600' },
   { tag: tags.strong, fontWeight: '700' },
   { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.strikethrough, textDecoration: 'line-through', color: 'var(--color-text-muted)' },
   { tag: tags.link, color: 'var(--color-accent)' },
   { tag: tags.url, color: 'var(--color-text-muted)', fontSize: '0.9em' },
   { tag: tags.processingInstruction, color: 'var(--color-text-muted)' },
@@ -152,6 +211,16 @@ const vaultTheme = EditorView.theme({
     textDecoration: 'underline',
     textUnderlineOffset: '2px',
     textDecorationColor: 'color-mix(in srgb, var(--color-accent) 50%, transparent)',
+  },
+  '.cm-highlight-mark': {
+    background: 'rgba(255, 210, 0, 0.22)',
+    borderRadius: '2px',
+    padding: '1px 0',
+  },
+  '.cm-comment-mark': {
+    color: 'var(--color-text-muted)',
+    opacity: '0.5',
+    fontStyle: 'italic',
   },
   '&.cm-readonly .cm-content': { opacity: '0.6' },
 })
@@ -240,11 +309,202 @@ function SuggestDropdown({ docs, selectedIdx, rect, onSelect }: SuggestDropdownP
   )
 }
 
+// ── Markdown Editing Helpers ─────────────────────────────────────────────────
+// Obsidian 스타일 리스트 / 인라인 서식 키바인딩용 순수 함수들
+
+/** 리스트 항목 줄 탐지 정규식 */
+const LIST_RE = /^(\s*)([-*+]|\d+\.)( \[[ xX]\])? /
+
+/** 번호 목록: 특정 인덴트 레벨에서 바로 위의 항목 번호 반환 (없으면 0) */
+function prevNumAtIndent(state: EditorState, fromLine: number, indentLen: number): number {
+  for (let n = fromLine - 1; n >= 1; n--) {
+    const text = state.doc.line(n).text
+    if (text.trim() === '') continue
+    const m = text.match(/^(\s*)(\d+\.)/)
+    if (m) {
+      const d = m[1].length
+      if (d === indentLen) return parseInt(m[2])
+      if (d < indentLen) return 0  // 상위 레벨 — 같은 레벨 없음
+    } else if (!LIST_RE.test(text)) {
+      return 0  // 리스트 아닌 줄 — 탐색 중단
+    }
+  }
+  return 0
+}
+
+/** Tab: 리스트 항목 들여쓰기 (+2 spaces), 번호 목록은 레벨별 번호 재계산 */
+function mdIndentList(view: EditorView): boolean {
+  const { state } = view
+  const { from, to } = state.selection.main
+  if (from !== to) return false
+  const line = state.doc.lineAt(from)
+  if (!LIST_RE.test(line.text)) return false
+
+  // 번호 목록: 새 인덴트 레벨에 맞는 번호 계산
+  const numM = line.text.match(/^(\s*)(\d+\.)( .*)/)
+  if (numM) {
+    const newIndentLen = numM[1].length + 2
+    const prev = prevNumAtIndent(state, line.number, newIndentLen)
+    const newNum = prev > 0 ? prev + 1 : 1
+    const oldMarker = numM[2]
+    const newMarker = `${newNum}.`
+    const newText = `  ${numM[1]}${newMarker}${numM[3]}`
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: newText },
+      selection: { anchor: from + 2 + (newMarker.length - oldMarker.length) },
+      userEvent: 'input.indent',
+    })
+    return true
+  }
+
+  // 불릿 목록: 2 spaces 추가
+  view.dispatch({
+    changes: { from: line.from, insert: '  ' },
+    selection: { anchor: from + 2 },
+    userEvent: 'input.indent',
+  })
+  return true
+}
+
+/** Shift-Tab: 리스트 항목 내어쓰기 (-2 spaces) */
+function mdDedentList(view: EditorView): boolean {
+  const { state } = view
+  const { from, to } = state.selection.main
+  if (from !== to) return false
+  const line = state.doc.lineAt(from)
+  if (!LIST_RE.test(line.text)) return false
+  const spaces = (line.text.match(/^( +)/) ?? ['', ''])[1].length
+  if (spaces < 2) return false
+  const remove = Math.min(2, spaces)
+  view.dispatch({
+    changes: { from: line.from, to: line.from + remove, insert: '' },
+    selection: { anchor: Math.max(line.from, from - remove) },
+    userEvent: 'delete.dedent',
+  })
+  return true
+}
+
+/** Enter: 리스트 항목 연속 생성 / 빈 항목이면 리스트 탈출 */
+function mdContinueList(view: EditorView): boolean {
+  const { state } = view
+  const { from, to } = state.selection.main
+  if (from !== to) return false
+  const line = state.doc.lineAt(from)
+  const m = line.text.match(/^(\s*)([-*+]|\d+\.)( \[[ xX]\])? (.*)$/)
+  if (!m) return false
+  const [, indent, marker, checkbox = '', content] = m
+
+  // 빈 항목 + 커서가 줄 끝 → 리스트 탈출 (불릿 프리픽스 제거)
+  if (!content.trim() && from === line.to) {
+    const prefixLen = indent.length + marker.length + checkbox.length + 1
+    view.dispatch({
+      changes: { from: line.from, to: line.from + prefixLen, insert: '' },
+      selection: { anchor: line.from },
+      userEvent: 'input',
+    })
+    return true
+  }
+
+  // 커서가 줄 중간이면 기본 Enter 처리로 위임
+  if (from < line.to) return false
+
+  // 번호 목록: 같은 인덴트 레벨의 다음 번호
+  let nextMarker = marker
+  const numMatch = marker.match(/^(\d+)\.$/)
+  if (numMatch) {
+    const prev = prevNumAtIndent(state, line.number, indent.length)
+    const base = prev > 0 ? prev : parseInt(numMatch[1])
+    nextMarker = `${base + 1}.`
+  }
+
+  // 체크박스: 새 항목은 미완료로
+  const nextCheckbox = checkbox ? ' [ ]' : ''
+  const newLine = `\n${indent}${nextMarker}${nextCheckbox} `
+
+  view.dispatch({
+    changes: { from, insert: newLine },
+    selection: { anchor: from + newLine.length },
+    userEvent: 'input',
+  })
+  return true
+}
+
+/** Ctrl+B / Ctrl+I: 인라인 마크 토글 (** 또는 *) */
+function mdToggleMark(view: EditorView, mark: string): boolean {
+  const { state } = view
+  const { from, to } = state.selection.main
+  const mlen = mark.length
+
+  if (from === to) {
+    // 선택 없음: 마크 쌍 삽입 후 커서를 가운데
+    view.dispatch({
+      changes: { from, insert: mark + mark },
+      selection: { anchor: from + mlen },
+      userEvent: 'input',
+    })
+    return true
+  }
+
+  // 이미 감싸져 있으면 제거
+  const before = state.doc.sliceString(from - mlen, from)
+  const after  = state.doc.sliceString(to, to + mlen)
+  if (before === mark && after === mark) {
+    view.dispatch({
+      changes: [
+        { from: from - mlen, to: from, insert: '' },
+        { from: to, to: to + mlen, insert: '' },
+      ],
+      selection: { anchor: from - mlen, head: to - mlen },
+      userEvent: 'delete',
+    })
+  } else {
+    view.dispatch({
+      changes: [{ from, insert: mark }, { from: to, insert: mark }],
+      selection: { anchor: from + mlen, head: to + mlen },
+      userEvent: 'input',
+    })
+  }
+  return true
+}
+
+/** Enter: 인용구(>) 연속 생성 / 빈 항목이면 인용구 탈출 */
+function mdContinueBlockquote(view: EditorView): boolean {
+  const { state } = view
+  const { from, to } = state.selection.main
+  if (from !== to) return false
+  const line = state.doc.lineAt(from)
+  // `> ` 또는 `>> ` 등 중첩 인용구 패턴
+  const m = line.text.match(/^((?:> ?)+)(.*)$/)
+  if (!m) return false
+  const [, prefix, content] = m
+
+  // 빈 항목 + 커서 줄 끝 → 인용구 탈출 (프리픽스 제거)
+  if (!content.trim() && from === line.to) {
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: '' },
+      selection: { anchor: line.from },
+      userEvent: 'input',
+    })
+    return true
+  }
+
+  // 커서가 줄 중간이면 기본 Enter 처리로 위임
+  if (from < line.to) return false
+
+  const newLine = `\n${prefix}`
+  view.dispatch({
+    changes: { from, insert: newLine },
+    selection: { anchor: from + newLine.length },
+    userEvent: 'input',
+  })
+  return true
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function MarkdownEditor() {
   const { editingDocId, closeEditor, openInEditor } = useUIStore()
-  const { loadedDocuments, setLoadedDocuments } = useVaultStore()
+  const { loadedDocuments, setLoadedDocuments, vaultPath } = useVaultStore()
   const { setNodes, setLinks } = useGraphStore()
 
   const doc = (
@@ -258,6 +518,12 @@ export default function MarkdownEditor() {
   const [isLocked, setIsLocked] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [wikiSuggest, setWikiSuggest] = useState<WikiSuggestState | null>(null)
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const isRenamingRef = useRef(false)
+  const renameValueRef = useRef('')
+  renameValueRef.current = renameValue
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isDirty = useRef(false)
@@ -298,6 +564,54 @@ export default function MarkdownEditor() {
   const clampedIdx = filteredDocs.length > 0
     ? Math.min(wikiSuggest?.selectedIdx ?? 0, filteredDocs.length - 1)
     : 0
+
+  // ── 이름 변경 ─────────────────────────────────────────────────────────────
+
+  const startRename = useCallback(() => {
+    if (!canSave) return
+    const currentDoc = docRef.current as LoadedDocument
+    if (!currentDoc?.absolutePath) return
+    setRenameValue(currentDoc.filename.replace(/\.md$/i, ''))
+    isRenamingRef.current = true
+    setIsRenaming(true)
+    setTimeout(() => { renameInputRef.current?.select() }, 20)
+  }, [canSave])
+
+  const commitRename = useCallback(async () => {
+    // Enter 키 + onBlur 이중 호출 방어
+    if (!isRenamingRef.current) return
+    isRenamingRef.current = false
+    setIsRenaming(false)
+    const value = renameValueRef.current
+    const currentDoc = docRef.current as LoadedDocument
+    if (!currentDoc?.absolutePath || !value.trim()) return
+    const newFilename = value.trim().endsWith('.md')
+      ? value.trim()
+      : `${value.trim()}.md`
+    if (newFilename === currentDoc.filename) return
+    try {
+      await window.vaultAPI!.renameFile(currentDoc.absolutePath, newFilename)
+      if (vaultPath && window.vaultAPI) {
+        const files = await window.vaultAPI.loadFiles(vaultPath)
+        if (files) {
+          const docs = parseVaultFiles(files) as LoadedDocument[]
+          setLoadedDocuments(docs)
+          const { nodes, links } = buildGraph(docs)
+          setNodes(nodes)
+          setLinks(links)
+          const sep = currentDoc.absolutePath.includes('\\') ? '\\' : '/'
+          const dir = currentDoc.absolutePath.replace(/[\\/][^\\/]+$/, '')
+          const newAbsPath = `${dir}${sep}${newFilename}`
+          const newDoc = docs.find(d =>
+            d.absolutePath.replace(/\\/g, '/') === newAbsPath.replace(/\\/g, '/')
+          )
+          if (newDoc) openInEditor(newDoc.id)
+        }
+      }
+    } catch (e) {
+      console.error('[MarkdownEditor] rename failed:', e)
+    }
+  }, [vaultPath, setLoadedDocuments, setNodes, setLinks, openInEditor])
 
   // ── 저장 ──────────────────────────────────────────────────────────────────
 
@@ -458,6 +772,29 @@ export default function MarkdownEditor() {
                 return true
               },
             },
+            // ── Markdown 리스트 들여쓰기 ──
+            { key: 'Tab',       run: mdIndentList },
+            { key: 'Shift-Tab', run: mdDedentList },
+            // ── 리스트 / 인용구 연속 생성 (WikiSuggest가 비활성일 때만) ──
+            {
+              key: 'Enter',
+              run: (view) => {
+                if (wikiSuggestRef.current) return false
+                if (mdContinueList(view)) return true
+                return mdContinueBlockquote(view)
+              },
+            },
+            // ── 인라인 서식 ──
+            { key: 'Ctrl-b',       run: (view) => mdToggleMark(view, '**') },
+            { key: 'Mod-b',        run: (view) => mdToggleMark(view, '**') },
+            { key: 'Ctrl-i',       run: (view) => mdToggleMark(view, '*') },
+            { key: 'Mod-i',        run: (view) => mdToggleMark(view, '*') },
+            { key: 'Ctrl-Shift-s', run: (view) => mdToggleMark(view, '~~') },
+            { key: 'Mod-Shift-s',  run: (view) => mdToggleMark(view, '~~') },
+            { key: 'Ctrl-Shift-h', run: (view) => mdToggleMark(view, '==') },
+            { key: 'Mod-Shift-h',  run: (view) => mdToggleMark(view, '==') },
+            { key: 'Ctrl-Shift-c', run: (view) => mdToggleMark(view, '`') },
+            { key: 'Mod-Shift-c',  run: (view) => mdToggleMark(view, '`') },
             ...defaultKeymap,
             ...historyKeymap,
             { key: 'Ctrl-s', run: () => { handleManualSaveRef.current(); return true } },
@@ -466,6 +803,8 @@ export default function MarkdownEditor() {
           markdown(),
           syntaxHighlighting(markdownHighlight),
           wikiPlugin,
+          buildHighlightPlugin(),
+          buildCommentPlugin(),
           vaultTheme,
           EditorView.lineWrapping,
           readOnlyCompartment.current.of([]),
@@ -577,9 +916,43 @@ export default function MarkdownEditor() {
           <ArrowLeft size={13} />
         </button>
 
-        <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={doc.filename}>
-          {displayName}
-        </span>
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={e => setRenameValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+              if (e.key === 'Escape') { e.preventDefault(); isRenamingRef.current = false; setIsRenaming(false) }
+            }}
+            style={{
+              flex: 1, fontSize: 12, fontWeight: 500,
+              background: 'var(--color-bg-surface)',
+              color: 'var(--color-text-primary)',
+              border: '1px solid var(--color-accent)',
+              borderRadius: 4, padding: '1px 6px', outline: 'none',
+            }}
+            autoFocus
+          />
+        ) : (
+          <button
+            onClick={canSave ? startRename : undefined}
+            title={canSave ? '클릭하여 이름 변경' : doc.filename}
+            style={{
+              flex: 1, fontSize: 12, fontWeight: 500,
+              color: 'var(--color-text-primary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              background: 'transparent', border: 'none',
+              cursor: canSave ? 'text' : 'default',
+              textAlign: 'left', padding: 0,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
+            {canSave && <Pencil size={10} style={{ flexShrink: 0, color: 'var(--color-text-muted)', opacity: 0.5 }} />}
+          </button>
+        )}
 
         <button
           onClick={() => setIsLocked(v => !v)}

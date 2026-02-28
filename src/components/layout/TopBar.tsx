@@ -1,4 +1,4 @@
-import { Monitor, Settings, Plus, Minus, Square, X, Terminal, PanelLeft, PanelRight } from 'lucide-react'
+import { Monitor, Settings, Minus, Square, X, Terminal, PanelLeft, PanelRight } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/lib/utils'
@@ -9,7 +9,7 @@ export default function TopBar() {
   const {
     graphMode, panelOpacity,
     leftPanelCollapsed, rightPanelCollapsed,
-    setGraphMode, setCenterTab, setPanelOpacity,
+    setGraphMode, setPanelOpacity,
     toggleLeftPanel, toggleRightPanel,
   } = useUIStore()
   const { toggleSettingsPanel } = useSettingsStore()
@@ -45,20 +45,6 @@ export default function TopBar() {
 
       {/* Right controls */}
       <div className="flex items-center gap-1" style={noDragStyle}>
-
-        {/* MD Converter "+" button */}
-        <button
-          onClick={() => setCenterTab('editor')}
-          className={cn(
-            'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors',
-            'hover:bg-[var(--color-bg-hover)]'
-          )}
-          style={{ color: 'var(--color-text-secondary)' }}
-          title="MD 변환 툴"
-          aria-label="MD 변환 툴 열기"
-        >
-          <Plus size={13} />
-        </button>
 
         {/* 3D / 2D toggle */}
         <button

@@ -1,4 +1,5 @@
 import type { DirectorId } from '@/types'
+import type { ProjectInfo } from '@/stores/settingsStore'
 
 /**
  * Korean system prompts for each director persona.
@@ -91,4 +92,33 @@ export const PERSONA_PROMPTS: Record<DirectorId, string> = {
 - 단기 vs 장기 비용 분석 제시
 - 구체적인 기술 솔루션 (ECS, 오브젝트 풀링, 델타 동기화 등)
 - 기술 부채 리스크 사전 경고` + RAG_INSTRUCTION,
+}
+
+/**
+ * Build a project context block to prepend to the system prompt.
+ * Only non-empty fields are included so the prompt stays clean when no data is entered.
+ */
+export function buildProjectContext(
+  projectInfo: ProjectInfo,
+  directorBio?: string
+): string {
+  const lines: string[] = []
+
+  if (projectInfo.name)        lines.push(`- 프로젝트명: ${projectInfo.name}`)
+  if (projectInfo.engine)      lines.push(`- 게임 엔진: ${projectInfo.engine}`)
+  if (projectInfo.genre)       lines.push(`- 장르: ${projectInfo.genre}`)
+  if (projectInfo.platform)    lines.push(`- 플랫폼: ${projectInfo.platform}`)
+  if (projectInfo.scale)       lines.push(`- 개발 규모: ${projectInfo.scale}`)
+  if (projectInfo.teamSize)    lines.push(`- 팀 인원: ${projectInfo.teamSize}`)
+  if (projectInfo.description) lines.push(`- 프로젝트 개요: ${projectInfo.description}`)
+
+  const parts: string[] = []
+  if (lines.length > 0) {
+    parts.push(`## 현재 프로젝트 정보\n${lines.join('\n')}`)
+  }
+  if (directorBio?.trim()) {
+    parts.push(`## 나의 역할 및 특성\n${directorBio.trim()}`)
+  }
+
+  return parts.length > 0 ? parts.join('\n\n') + '\n\n---\n\n' : ''
 }

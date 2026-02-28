@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
@@ -17,6 +18,7 @@ const LABEL_Y_OFFSET = 16  // px below node center
 export default function Graph2D({ width, height }: Props) {
   const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+  const colorRules = useSettingsStore(s => s.colorRules)
 
   const nodeColorMap = useMemo(
     () => buildNodeColorMap(nodes, nodeColorMode),
@@ -400,7 +402,7 @@ export default function Graph2D({ width, height }: Props) {
           {/* Nodes */}
           <g data-testid="graph-nodes">
             {nodes.map(node => {
-              const color = getNodeColor(node, nodeColorMode, nodeColorMap)
+              const color = getNodeColor(node, nodeColorMode, nodeColorMap, colorRules)
               const isSelected = selectedNodeId === node.id
               return (
                 <circle

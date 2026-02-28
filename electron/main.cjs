@@ -232,6 +232,14 @@ function registerVaultIpcHandlers() {
     fs.unlinkSync(resolved)
     return { success: true }
   })
+
+  // ── vault:read-file ───────────────────────────────────────────────────────────
+  ipcMain.handle('vault:read-file', (_event, filePath) => {
+    if (!filePath || typeof filePath !== 'string') return null
+    const resolved = path.resolve(filePath)
+    if (!fs.existsSync(resolved)) return null
+    return fs.readFileSync(resolved, 'utf-8')
+  })
 }
 
 function registerBackendIpcHandlers() {

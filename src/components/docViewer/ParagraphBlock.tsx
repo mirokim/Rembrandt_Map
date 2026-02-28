@@ -9,13 +9,16 @@ interface Props {
   speaker: SpeakerId
 }
 
-/** Convert [[slug]] and [[target|display]] to markdown links for react-markdown */
+/** Convert [[slug]], [[target|display]], [[target#heading]] to markdown links */
 function preprocessWikiLinks(text: string): string {
   return text.replace(/\[\[([^\]]+)\]\]/g, (_match, inner: string) => {
     const parts = inner.split('|')
-    const target = parts[0].trim()
-    const display = (parts[1] ?? parts[0]).trim()
-    return `[${display}](wikilink:${encodeURIComponent(target)})`
+    const rawTarget = parts[0].trim()
+    // Strip heading anchor for node resolution; keep alias or full ref for display
+    const target = rawTarget.split('#')[0].trim()
+    const display = parts.length > 1 ? parts[1].trim() : rawTarget
+    // Use fragment URL (#wikilink-...) — react-markdown allows fragments without sanitization
+    return `[${display}](#wikilink-${encodeURIComponent(target)})`
   })
 }
 
@@ -61,8 +64,8 @@ export default function ParagraphBlock({ section, speaker }: Props) {
           urlTransform={(url) => url}
           components={{
             a({ href, children }) {
-              if (href?.startsWith('wikilink:')) {
-                const slug = decodeURIComponent(href.slice('wikilink:'.length))
+              if (href?.startsWith('#wikilink-')) {
+                const slug = decodeURIComponent(href.slice('#wikilink-'.length))
                 return <WikiLink slug={slug} />
               }
               return (

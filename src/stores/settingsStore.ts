@@ -3,10 +3,47 @@ import { persist } from 'zustand/middleware'
 import type { DirectorId } from '@/types'
 import type { ProviderId } from '@/lib/modelConfig'
 import { DEFAULT_PERSONA_MODELS, MODEL_OPTIONS, envKeyForProvider } from '@/lib/modelConfig'
+import type { VaultPersonaConfig } from '@/lib/personaVaultConfig'
 
 // ── State interface ────────────────────────────────────────────────────────────
 
 export type AppTheme = 'light' | 'dark' | 'oled'
+
+export interface ProjectInfo {
+  name: string
+  engine: string
+  genre: string
+  platform: string
+  scale: string
+  teamSize: string
+  description: string
+}
+
+export const DEFAULT_PROJECT_INFO: ProjectInfo = {
+  name: '',
+  engine: '',
+  genre: '',
+  platform: '',
+  scale: '',
+  teamSize: '',
+  description: '',
+}
+
+export interface ColorRule {
+  id: string
+  keyword: string
+  color: string
+}
+
+export interface CustomPersona {
+  id: string
+  label: string
+  role: string
+  color: string
+  darkBg: string
+  systemPrompt: string
+  modelId: string
+}
 
 interface SettingsState {
   /** Mapping: director persona → selected model ID */
@@ -17,6 +54,20 @@ interface SettingsState {
   settingsPanelOpen: boolean
   /** UI colour theme */
   theme: AppTheme
+  /** Project metadata (injected into AI prompts as context) */
+  projectInfo: ProjectInfo
+  /** Per-director custom persona descriptions */
+  directorBios: Partial<Record<DirectorId, string>>
+  /** Keyword-based node color rules */
+  colorRules: ColorRule[]
+  /** User-defined additional personas */
+  customPersonas: CustomPersona[]
+  /** System prompt overrides for built-in director personas */
+  personaPromptOverrides: Record<string, string>
+  /** Built-in persona IDs that the user has disabled (hidden) */
+  disabledPersonaIds: string[]
+  /** Whether markdown editor opens in locked (read-only) mode by default */
+  editorDefaultLocked: boolean
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -24,6 +75,22 @@ interface SettingsState {
   setSettingsPanelOpen: (open: boolean) => void
   toggleSettingsPanel: () => void
   setTheme: (theme: AppTheme) => void
+  setProjectInfo: (info: Partial<ProjectInfo>) => void
+  setDirectorBio: (director: DirectorId, bio: string) => void
+  addColorRule: (rule: ColorRule) => void
+  updateColorRule: (id: string, updates: Partial<Omit<ColorRule, 'id'>>) => void
+  removeColorRule: (id: string) => void
+  addPersona: (persona: CustomPersona) => void
+  updatePersona: (id: string, updates: Partial<Omit<CustomPersona, 'id'>>) => void
+  removePersona: (id: string) => void
+  setPersonaPromptOverride: (personaId: string, prompt: string) => void
+  disableBuiltInPersona: (id: string) => void
+  restoreBuiltInPersona: (id: string) => void
+  /** Apply persona config loaded from vault file (overrides current state) */
+  loadVaultPersonas: (config: VaultPersonaConfig) => void
+  /** Reset all persona state to defaults (called when loading a vault with no config) */
+  resetVaultPersonas: () => void
+  setEditorDefaultLocked: (locked: boolean) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -60,6 +127,13 @@ export const useSettingsStore = create<SettingsState>()(
       apiKeys: {},
       settingsPanelOpen: false,
       theme: 'dark' as AppTheme,
+      projectInfo: { ...DEFAULT_PROJECT_INFO },
+      directorBios: {},
+      colorRules: [],
+      customPersonas: [],
+      personaPromptOverrides: {},
+      disabledPersonaIds: [],
+      editorDefaultLocked: false,
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -80,6 +154,76 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ settingsPanelOpen: !state.settingsPanelOpen })),
 
       setTheme: (theme) => set({ theme }),
+
+      setProjectInfo: (info) =>
+        set((state) => ({ projectInfo: { ...state.projectInfo, ...info } })),
+
+      setDirectorBio: (director, bio) =>
+        set((state) => ({ directorBios: { ...state.directorBios, [director]: bio } })),
+
+      addColorRule: (rule) =>
+        set((state) => ({ colorRules: [...state.colorRules, rule] })),
+
+      updateColorRule: (id, updates) =>
+        set((state) => ({
+          colorRules: state.colorRules.map(r => r.id === id ? { ...r, ...updates } : r),
+        })),
+
+      removeColorRule: (id) =>
+        set((state) => ({ colorRules: state.colorRules.filter(r => r.id !== id) })),
+
+      addPersona: (persona) =>
+        set((state) => ({ customPersonas: [...state.customPersonas, persona] })),
+
+      updatePersona: (id, updates) =>
+        set((state) => ({
+          customPersonas: state.customPersonas.map(p => p.id === id ? { ...p, ...updates } : p),
+        })),
+
+      removePersona: (id) =>
+        set((state) => ({ customPersonas: state.customPersonas.filter(p => p.id !== id) })),
+
+      setPersonaPromptOverride: (personaId, prompt) =>
+        set((state) => ({
+          personaPromptOverrides: prompt
+            ? { ...state.personaPromptOverrides, [personaId]: prompt }
+            : Object.fromEntries(Object.entries(state.personaPromptOverrides).filter(([k]) => k !== personaId)),
+        })),
+
+      disableBuiltInPersona: (id) =>
+        set((state) => ({
+          disabledPersonaIds: state.disabledPersonaIds.includes(id)
+            ? state.disabledPersonaIds
+            : [...state.disabledPersonaIds, id],
+        })),
+
+      restoreBuiltInPersona: (id) =>
+        set((state) => ({
+          disabledPersonaIds: state.disabledPersonaIds.filter(d => d !== id),
+        })),
+
+      loadVaultPersonas: (config) =>
+        set((state) => ({
+          customPersonas: config.customPersonas,
+          personaPromptOverrides: config.personaPromptOverrides,
+          disabledPersonaIds: config.disabledPersonaIds,
+          directorBios: config.directorBios,
+          personaModels: migratePersonaModels({
+            ...state.personaModels,
+            ...config.personaModels,
+          }),
+        })),
+
+      resetVaultPersonas: () =>
+        set({
+          customPersonas: [],
+          personaPromptOverrides: {},
+          disabledPersonaIds: [],
+          directorBios: {},
+          personaModels: { ...DEFAULT_PERSONA_MODELS },
+        }),
+
+      setEditorDefaultLocked: (editorDefaultLocked) => set({ editorDefaultLocked }),
     }),
     {
       name: 'rembrandt-settings',
@@ -87,6 +231,13 @@ export const useSettingsStore = create<SettingsState>()(
         personaModels: state.personaModels,
         apiKeys: state.apiKeys,
         theme: state.theme,
+        projectInfo: state.projectInfo,
+        directorBios: state.directorBios,
+        colorRules: state.colorRules,
+        customPersonas: state.customPersonas,
+        personaPromptOverrides: state.personaPromptOverrides,
+        disabledPersonaIds: state.disabledPersonaIds,
+        editorDefaultLocked: state.editorDefaultLocked,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {

@@ -1,13 +1,15 @@
 import { useState, useCallback } from 'react'
 import {
   SortAsc, SortDesc, ChevronsUpDown, ChevronsDownUp,
-  Clock, Type,
+  Clock, Type, FilePlus,
 } from 'lucide-react'
 import { SPEAKER_IDS } from '@/lib/speakerConfig'
 import { useDocumentFilter } from '@/hooks/useDocumentFilter'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { parseVaultFiles } from '@/lib/markdownParser'
+import { buildGraph } from '@/lib/graphBuilder'
 import SearchBar from './SearchBar'
 import SpeakerGroup from './SpeakerGroup'
 import FolderGroup from './FolderGroup'
@@ -24,7 +26,14 @@ export default function FileTree() {
   } = useDocumentFilter()
 
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
-  const { openInEditor } = useUIStore()
+  const { setNodes, setLinks } = useGraphStore()
+  const { openInEditor, editingDocId } = useUIStore()
+
+  const rebuildGraph = useCallback((docs: LoadedDocument[]) => {
+    const { nodes, links } = buildGraph(docs)
+    setNodes(nodes)
+    setLinks(links)
+  }, [setNodes, setLinks])
 
   // Expand/collapse all state: null = each folder uses its own local state
   const [expandOverride, setExpandOverride] = useState<boolean | null>(null)
@@ -77,14 +86,31 @@ export default function FileTree() {
     const newFilename = newName.trim().endsWith('.md')
       ? newName.trim()
       : `${newName.trim()}.md`
+    if (newFilename === filename) return
+
+    // 이름 변경 전에 현재 편집 중인 파일인지 확인
+    const oldDoc = loadedDocuments?.find(d => (d as LoadedDocument).absolutePath === absolutePath)
+    const wasEditing = Boolean(oldDoc && editingDocId === oldDoc.id)
+
     try {
       await window.vaultAPI?.renameFile(absolutePath, newFilename)
-      // Reload vault to reflect changes
       if (vaultPath && window.vaultAPI) {
         const files = await window.vaultAPI.loadFiles(vaultPath)
         if (files) {
-          const docs = parseVaultFiles(files)
-          setLoadedDocuments(docs as LoadedDocument[])
+          const docs = parseVaultFiles(files) as LoadedDocument[]
+          setLoadedDocuments(docs)
+          rebuildGraph(docs)
+
+          // 편집 중이던 파일이면 새 ID로 에디터 업데이트
+          if (wasEditing) {
+            const sep = absolutePath.includes('\\') ? '\\' : '/'
+            const dir = absolutePath.replace(/[\\/][^\\/]+$/, '')
+            const newAbsPath = `${dir}${sep}${newFilename}`
+            const newDoc = docs.find(d =>
+              d.absolutePath.replace(/\\/g, '/') === newAbsPath.replace(/\\/g, '/')
+            )
+            if (newDoc) openInEditor(newDoc.id)
+          }
         }
       }
     } catch (e) {
@@ -97,14 +123,46 @@ export default function FileTree() {
     if (!confirmed) return
     try {
       await window.vaultAPI?.deleteFile(absolutePath)
-      // Reload vault
       if (vaultPath && window.vaultAPI) {
         const files = await window.vaultAPI.loadFiles(vaultPath)
-        const docs = files ? parseVaultFiles(files) : []
-        setLoadedDocuments(docs as LoadedDocument[])
+        const docs = (files ? parseVaultFiles(files) : []) as LoadedDocument[]
+        setLoadedDocuments(docs)
+        rebuildGraph(docs)
       }
     } catch (e) {
       console.error('[FileTree] delete failed:', e)
+    }
+  }
+
+  const handleNewDocument = async () => {
+    if (!vaultPath || !window.vaultAPI) return
+    const sep = vaultPath.includes('\\') ? '\\' : '/'
+    // Find a unique filename: 무제.md, 무제 2.md, 무제 3.md ...
+    const existing = new Set(
+      (loadedDocuments ?? []).map(d => (d as LoadedDocument).absolutePath.replace(/\\/g, '/'))
+    )
+    let name = '무제'
+    let counter = 1
+    let newPath = `${vaultPath}${sep}${name}.md`
+    while (existing.has(newPath.replace(/\\/g, '/'))) {
+      counter++
+      name = `무제 ${counter}`
+      newPath = `${vaultPath}${sep}${name}.md`
+    }
+    try {
+      await window.vaultAPI.saveFile(newPath, `# ${name}\n\n`)
+      const files = await window.vaultAPI.loadFiles(vaultPath)
+      if (files) {
+        const docs = parseVaultFiles(files) as LoadedDocument[]
+        setLoadedDocuments(docs)
+        rebuildGraph(docs)
+        const newDoc = docs.find(d =>
+          d.absolutePath.replace(/\\/g, '/') === newPath.replace(/\\/g, '/')
+        )
+        if (newDoc) openInEditor(newDoc.id)
+      }
+    } catch (e) {
+      console.error('[FileTree] new document failed:', e)
     }
   }
 
@@ -140,20 +198,24 @@ export default function FileTree() {
           justifyContent: 'center',
         }}
       >
-        <button style={iconBtn(sortBy === 'name')} title="이름순 정렬" onClick={() => setSortBy('name')}>
-          <Type size={11} />
-        </button>
-
-        <button style={iconBtn(sortBy === 'date')} title="수정일순 정렬" onClick={() => setSortBy('date')}>
-          <Clock size={11} />
+        <button
+          style={iconBtn(sortBy === 'name')}
+          title={`이름순${sortBy === 'name' ? (sortDir === 'asc' ? ' (오름차순)' : ' (내림차순)') : ''}`}
+          onClick={() => sortBy === 'name' ? toggleSortDir() : setSortBy('name')}
+        >
+          {sortBy === 'name'
+            ? (sortDir === 'asc' ? <SortAsc size={11} /> : <SortDesc size={11} />)
+            : <Type size={11} />}
         </button>
 
         <button
-          style={iconBtn()}
-          title={sortDir === 'asc' ? '오름차순 → 내림차순' : '내림차순 → 오름차순'}
-          onClick={toggleSortDir}
+          style={iconBtn(sortBy === 'date')}
+          title={`수정일순${sortBy === 'date' ? (sortDir === 'asc' ? ' (오름차순)' : ' (내림차순)') : ''}`}
+          onClick={() => sortBy === 'date' ? toggleSortDir() : setSortBy('date')}
         >
-          {sortDir === 'asc' ? <SortAsc size={11} /> : <SortDesc size={11} />}
+          {sortBy === 'date'
+            ? (sortDir === 'asc' ? <SortAsc size={11} /> : <SortDesc size={11} />)
+            : <Clock size={11} />}
         </button>
 
         <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
@@ -164,6 +226,17 @@ export default function FileTree() {
 
         <button style={iconBtn()} title="모두 접기" onClick={handleCollapseAll}>
           <ChevronsDownUp size={11} />
+        </button>
+
+        <div style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px' }} />
+
+        <button
+          style={iconBtn()}
+          title={vaultPath ? '새 문서 만들기' : '볼트를 먼저 선택하세요'}
+          onClick={handleNewDocument}
+          disabled={!vaultPath}
+        >
+          <FilePlus size={11} />
         </button>
       </div>
 

@@ -27,6 +27,7 @@ declare global {
       saveFile(filePath: string, content: string): Promise<{ success: boolean; path: string }>
       renameFile(absolutePath: string, newFilename: string): Promise<{ success: boolean; newPath: string }>
       deleteFile(absolutePath: string): Promise<{ success: boolean }>
+      readFile(filePath: string): Promise<string | null>
     }
 
     // ── backendAPI (Phase 1-3) ────────────────────────────────────────────────

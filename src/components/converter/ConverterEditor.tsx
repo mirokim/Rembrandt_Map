@@ -7,24 +7,16 @@
  *   Stage 3 — 검토·승인: 편집 가능 textarea + 키워드 칩 + 저장/다운로드
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronLeft, ArrowRight, Check, Download, Save, RotateCcw, Upload, Folder, Globe } from 'lucide-react'
 import ConfluenceImporter from './ConfluenceImporter'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { SPEAKER_IDS, SPEAKER_CONFIG } from '@/lib/speakerConfig'
 import { convertToObsidianMD } from '@/services/llmClient'
 import { readFileAsText, type ConversionMeta, type ConversionType } from '@/lib/mdConverter'
 import { cn } from '@/lib/utils'
-
-// ── Constants ──────────────────────────────────────────────────────────────────
-
-const SPEAKERS = [
-  { id: 'chief_director', label: 'Chief' },
-  { id: 'art_director',   label: 'Art' },
-  { id: 'plan_director',  label: 'Plan' },
-  { id: 'level_director', label: 'Level' },
-  { id: 'prog_director',  label: 'Prog' },
-] as const
 
 const DOC_TYPES: ConversionType[] = ['회의록', '보고서', '기획서', '기타']
 
@@ -167,9 +159,24 @@ function StepIndicator({
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export default function ConverterEditor() {
+interface ConverterEditorProps {
+  /** When provided (embedded in Settings), hides the "← Graph" back button. */
+  onBack?: () => void
+}
+
+export default function ConverterEditor({ onBack }: ConverterEditorProps = {}) {
   const { setCenterTab } = useUIStore()
   const { vaultPath } = useVaultStore()
+  const customPersonas = useSettingsStore(s => s.customPersonas)
+  const disabledPersonaIds = useSettingsStore(s => s.disabledPersonaIds)
+
+  // Merge built-in speakers (excluding disabled) with custom personas
+  const speakers = useMemo(() => [
+    ...SPEAKER_IDS
+      .filter(id => !disabledPersonaIds.includes(id))
+      .map(id => ({ id, label: SPEAKER_CONFIG[id].label })),
+    ...customPersonas.map(p => ({ id: p.id, label: p.label })),
+  ], [customPersonas, disabledPersonaIds])
 
   // Stage / tab
   const [stage, setStage] = useState<Stage>('input')
@@ -183,6 +190,13 @@ export default function ConverterEditor() {
     date: today(),
     type: '회의록',
   })
+
+  // Keep meta.speaker in sync if currently selected speaker is removed
+  useEffect(() => {
+    if (speakers.length > 0 && !speakers.some(s => s.id === meta.speaker)) {
+      setMeta(m => ({ ...m, speaker: speakers[0].id }))
+    }
+  }, [speakers, meta.speaker])
   const [uploadFileName, setUploadFileName] = useState('')
   const [uploadError, setUploadError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -424,26 +438,28 @@ export default function ConverterEditor() {
     <div className="flex flex-col h-full">
 
       {/* ── Tab bar ── */}
-      <div
-        className="flex items-center shrink-0 gap-1 px-2"
-        style={{ height: 34, borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}
-      >
-        <button
-          onClick={() => setCenterTab('graph')}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors hover:bg-[var(--color-bg-hover)]"
-          style={{ color: 'var(--color-text-muted)' }}
-          title="그래프로 돌아가기"
+      {!onBack && (
+        <div
+          className="flex items-center shrink-0 gap-1 px-2"
+          style={{ height: 34, borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}
         >
-          <ChevronLeft size={12} />
-          Graph
-        </button>
-        <span
-          className="text-xs font-medium px-2"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          ✏️ MD 변환 에디터
-        </span>
-      </div>
+          <button
+            onClick={() => setCenterTab('graph')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors hover:bg-[var(--color-bg-hover)]"
+            style={{ color: 'var(--color-text-muted)' }}
+            title="그래프로 돌아가기"
+          >
+            <ChevronLeft size={12} />
+            Graph
+          </button>
+          <span
+            className="text-xs font-medium px-2"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            ✏️ MD 변환 에디터
+          </span>
+        </div>
+      )}
 
       {/* ── Step indicator ── */}
       <StepIndicator stage={stage} step2Status={step2Status} />
@@ -698,7 +714,7 @@ export default function ConverterEditor() {
                     outline: 'none',
                   }}
                 >
-                  {SPEAKERS.map(s => (
+                  {speakers.map(s => (
                     <option key={s.id} value={s.id}>{s.label} ({s.id})</option>
                   ))}
                 </select>

@@ -1,14 +1,15 @@
 import type { ChatMessage, SpeakerId, DirectorId, Attachment } from '@/types'
 import type { ConversionMeta } from '@/lib/mdConverter'
 import { MODEL_OPTIONS, getProviderForModel } from '@/lib/modelConfig'
-import { PERSONA_PROMPTS } from '@/lib/personaPrompts'
+import { PERSONA_PROMPTS, buildProjectContext } from '@/lib/personaPrompts'
 import { selectMockResponse } from '@/data/mockResponses'
 import { useSettingsStore, getApiKey } from '@/stores/settingsStore'
 import {
-  expandWithGraphNeighbors,
   rerankResults,
-  formatCompressedContext,
   frontendKeywordSearch,
+  buildDeepGraphContext,
+  buildGlobalGraphContext,
+  tokenizeQuery,
 } from '@/lib/graphRAG'
 
 // ── Obsidian MD conversion (MD 변환 에디터 파이프라인) ─────────────────────────
@@ -164,11 +165,23 @@ async function streamMockResponse(
  * @param userMessage    The user's query text
  * @param currentSpeaker Optional current persona for speaker affinity boost
  */
+/**
+ * 전체 탐색 인텐트를 감지하는 패턴.
+ * 이 패턴이 매칭되면 허브 노드 기반 전체 그래프 탐색으로 전환.
+ */
+const GLOBAL_INTENT_RE = /전체|전반적|모든\s*문서|프로젝트\s*전체|전체적인|overview|전체\s*인사이트|전반|총체적|전체\s*피드백|big.?picture/i
+
 export async function fetchRAGContext(
   userMessage: string,
   currentSpeaker?: string
 ): Promise<string> {
   try {
+    // ── 전체 탐색 인텐트: 허브 노드 기반 전체 그래프 탐색 ──────────────────
+    // 키워드 검색을 건너뛰고 바로 허브 중심 BFS로 광범위한 컨텍스트 수집
+    if (GLOBAL_INTENT_RE.test(userMessage)) {
+      return buildGlobalGraphContext(35, 4)
+    }
+
     let candidates: import('@/types').SearchResult[] = []
 
     if (typeof window !== 'undefined' && window.backendAPI) {
@@ -185,20 +198,19 @@ export async function fetchRAGContext(
       candidates = frontendKeywordSearch(userMessage, 8)
     }
 
-    if (candidates.length === 0) return ''
+    // Stage 2: Filter by minimum similarity (완화된 임계값 0.05)
+    // 이전 0.15는 너무 엄격하여 제목이 조금만 달라도 누락됨
+    const relevant = candidates.filter((r) => r.score > 0.05)
 
-    // Stage 2: Filter by minimum similarity (lowered for keyword-only search)
-    const relevant = candidates.filter((r) => r.score > 0.15)
-    if (relevant.length === 0) return ''
+    // Stage 3: Rerank by keyword overlap + speaker affinity → top 5 (시작 노드 확보)
+    // candidates가 적어도 buildDeepGraphContext 내부에서 허브 노드로 보완됨
+    const reranked = relevant.length > 0
+      ? rerankResults(relevant, userMessage, 5, currentSpeaker)
+      : []
 
-    // Stage 3: Rerank by keyword overlap + speaker affinity → top 3
-    const reranked = rerankResults(relevant, userMessage, 3, currentSpeaker)
-
-    // Stage 4: Expand with graph-connected neighbor sections
-    const neighbors = expandWithGraphNeighbors(reranked, 2)
-
-    // Stage 5: Format compressed context
-    return formatCompressedContext(reranked, neighbors)
+    // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
+    // queryTerms 전달 → 패시지-레벨 검색으로 각 문서의 가장 관련된 섹션 선택
+    return buildDeepGraphContext(reranked, 3, 20, tokenizeQuery(userMessage))
   } catch {
     // RAG failure is non-fatal — continue without context
     return ''
@@ -230,10 +242,16 @@ export async function streamMessage(
   userMessage: string,
   history: ChatMessage[],
   onChunk: (chunk: string) => void,
-  attachments?: Attachment[]
+  attachments?: Attachment[],
+  overrideRagContext?: string   // 키워드 검색 우회 — 노드 선택 AI 분석 등에 사용
 ): Promise<void> {
-  const { personaModels } = useSettingsStore.getState()
-  const modelId = personaModels[persona as DirectorId]
+  const { personaModels, projectInfo, directorBios, customPersonas, personaPromptOverrides } = useSettingsStore.getState()
+
+  // Resolve persona — may be a built-in director or a custom persona
+  const customPersona = customPersonas.find(p => p.id === persona)
+  const modelId = customPersona
+    ? customPersona.modelId
+    : personaModels[persona as DirectorId]
   const provider = getProviderForModel(modelId)
 
   if (!provider) {
@@ -251,14 +269,22 @@ export async function streamMessage(
   }
 
   const model = MODEL_OPTIONS.find((m) => m.id === modelId)!
-  const basePrompt = PERSONA_PROMPTS[persona as DirectorId]
+
+  // Resolve system prompt: custom persona > built-in override > built-in default
+  const basePrompt = customPersona
+    ? customPersona.systemPrompt
+    : (personaPromptOverrides[persona] ?? PERSONA_PROMPTS[persona as DirectorId] ?? '')
+
+  // Director bio only applies to built-in personas
+  const directorBio = customPersona ? undefined : directorBios[persona as DirectorId]
+  const projectContext = buildProjectContext(projectInfo, directorBio)
 
   // ── Graph-Augmented RAG context injection ──────────────────────────────────
-  // RAG context is injected as a user-role message to prevent prompt injection
-  // from untrusted vault documents overriding system instructions.
-  // The persona is passed for speaker affinity boosting during reranking.
-  const ragContext = await fetchRAGContext(userMessage, persona)
-  const systemPrompt = basePrompt
+  // overrideRagContext가 있으면 키워드 검색 없이 그대로 사용 (노드 직접 선택 분석 등)
+  const ragContext = overrideRagContext !== undefined
+    ? overrideRagContext
+    : await fetchRAGContext(userMessage, persona)
+  const systemPrompt = projectContext + basePrompt
 
   // ── Attachment processing ───────────────────────────────────────────────────
   // Separate image attachments (→ vision API) from text attachments (→ message injection)
@@ -274,9 +300,10 @@ export async function streamMessage(
     fullUserMessage = userMessage + textContext
   }
 
-  // Prepend RAG context as reference material in the user message
+  // 그래프 컨텍스트를 사용자 메시지 앞에 주입
+  // [직접] = 키워드 검색 직접 매칭, [1홉]/[2홉] = WikiLink 연결로 탐색한 문서
   if (ragContext) {
-    fullUserMessage = `${ragContext}---\n\n${fullUserMessage}`
+    fullUserMessage = `${ragContext}위 문서들은 볼트의 WikiLink 그래프를 탐색해 수집한 관련 자료입니다.\n답변 시 이 자료들을 참고하여 인사이트와 구체적인 피드백을 제공하세요.\n\n---\n\n${fullUserMessage}`
   }
 
   // Build message history, excluding the current user message

@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld('vaultAPI', {
   /** Permanently delete a file */
   deleteFile: (absolutePath) => ipcRenderer.invoke('vault:delete-file', absolutePath),
 
+  /** Read a single file by absolute path; returns null if not found */
+  readFile: (filePath) => ipcRenderer.invoke('vault:read-file', filePath),
+
   /**
    * Subscribe to vault file-change events.
    * Returns a cleanup function that removes the listener.

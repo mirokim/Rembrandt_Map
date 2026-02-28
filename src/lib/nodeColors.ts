@@ -13,6 +13,7 @@
  */
 
 import type { GraphNode, NodeColorMode } from '@/types'
+import type { ColorRule } from '@/stores/settingsStore'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 
 // Visually distinct palette (HSL-spaced, dark-theme friendly)
@@ -104,8 +105,18 @@ function speakerHex(node: GraphNode): string {
 export function getNodeColor(
   node: GraphNode,
   mode: NodeColorMode,
-  colorMap: Map<string, string>
+  colorMap: Map<string, string>,
+  colorRules?: ColorRule[]
 ): string {
+  if (mode === 'rules') {
+    if (!colorRules || colorRules.length === 0) return '#666'
+    const searchText = (node.label + ' ' + (node.tags ?? []).join(' ')).toLowerCase()
+    for (const rule of colorRules) {
+      const kw = rule.keyword.toLowerCase().trim()
+      if (kw && searchText.includes(kw)) return rule.color
+    }
+    return '#666'
+  }
   if (mode === 'document') {
     return colorMap.get(node.docId) ?? speakerHex(node)
   }
@@ -133,6 +144,7 @@ export function getNodeColor(
   // 'speaker' mode
   return speakerHex(node)
 }
+
 
 /**
  * Build the color lookup map for a set of nodes and a given mode.
@@ -169,5 +181,6 @@ export function buildNodeColorMap(
     const topics = nodes.map(n => extractTopic(n.label))
     return buildColorMap(topics)
   }
+  // 'rules' mode — colorMap not used; colors resolved per-node in getNodeColor
   return new Map()
 }
