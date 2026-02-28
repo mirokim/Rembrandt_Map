@@ -70,6 +70,10 @@ interface SettingsState {
   editorDefaultLocked: boolean
   /** Allowed tag names for AI tag suggestion */
   tagPresets: string[]
+  /** User-assigned hex colors per tag name (overrides auto-palette in graph) */
+  tagColors: Record<string, string>
+  /** User-assigned hex colors per folder path (overrides auto-palette in graph) */
+  folderColors: Record<string, string>
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -95,6 +99,8 @@ interface SettingsState {
   setEditorDefaultLocked: (locked: boolean) => void
   addTagPreset: (tag: string) => void
   removeTagPreset: (tag: string) => void
+  setTagColor: (tag: string, color: string) => void
+  setFolderColor: (folderPath: string, color: string) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -139,6 +145,8 @@ export const useSettingsStore = create<SettingsState>()(
       disabledPersonaIds: [],
       editorDefaultLocked: false,
       tagPresets: [],
+      tagColors: {},
+      folderColors: {},
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -237,6 +245,12 @@ export const useSettingsStore = create<SettingsState>()(
 
       removeTagPreset: (tag) =>
         set((s) => ({ tagPresets: s.tagPresets.filter(t => t !== tag) })),
+
+      setTagColor: (tag, color) =>
+        set((s) => ({ tagColors: { ...s.tagColors, [tag]: color } })),
+
+      setFolderColor: (folderPath, color) =>
+        set((s) => ({ folderColors: { ...s.folderColors, [folderPath]: color } })),
     }),
     {
       name: 'rembrandt-settings',
@@ -252,6 +266,8 @@ export const useSettingsStore = create<SettingsState>()(
         disabledPersonaIds: state.disabledPersonaIds,
         editorDefaultLocked: state.editorDefaultLocked,
         tagPresets: state.tagPresets,
+        tagColors: state.tagColors,
+        folderColors: state.folderColors,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {

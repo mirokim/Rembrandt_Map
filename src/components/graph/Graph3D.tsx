@@ -63,11 +63,13 @@ export default function Graph3D({ width, height }: Props) {
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
   const colorRules = useSettingsStore(s => s.colorRules)
+  const tagColors = useSettingsStore(s => s.tagColors)
+  const folderColors = useSettingsStore(s => s.folderColors)
 
   // Build color lookup map whenever nodes or color mode changes
   const nodeColorMap = useMemo(
-    () => buildNodeColorMap(nodes, nodeColorMode),
-    [nodes, nodeColorMode]
+    () => buildNodeColorMap(nodes, nodeColorMode, tagColors, folderColors),
+    [nodes, nodeColorMode, tagColors, folderColors]
   )
   const selectedNodeIdRef = useRef(selectedNodeId)
   selectedNodeIdRef.current = selectedNodeId

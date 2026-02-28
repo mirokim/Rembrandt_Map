@@ -283,7 +283,9 @@ export default function FileTree() {
     const folderAbsPath = `${vaultPath}${sep}${folderRelPath}`
     try {
       await window.vaultAPI.createFolder(folderAbsPath)
-      setExtraFolders(prev => [...prev, folderRelPath.replace(/\\/g, '/')])
+      const relNormalized = folderRelPath.replace(/\\/g, '/')
+      setExtraFolders(prev => prev.includes(relNormalized) ? prev : [...prev, relNormalized])
+      await reloadVault()
     } catch (e) {
       console.error('[FileTree] create folder failed:', e)
     }
@@ -434,7 +436,8 @@ export default function FileTree() {
       <div className="flex-1 overflow-y-auto py-1" onClick={handleGroupToggle}>
         {isVaultLoaded
           ? groupMode === 'folder'
-            ? folderGroups.map(fg => (
+            ? <>
+              {folderGroups.map(fg => (
                 <FolderGroup
                   key={fg.folderPath}
                   folderPath={fg.folderPath}
@@ -442,7 +445,20 @@ export default function FileTree() {
                   isOpenOverride={expandOverride}
                   onContextMenu={setContextMenu}
                 />
-              ))
+              ))}
+              {extraFolders
+                .filter(f => !folderGroups.some(fg => fg.folderPath === f))
+                .map(f => (
+                  <FolderGroup
+                    key={f}
+                    folderPath={f}
+                    docs={[]}
+                    isOpenOverride={expandOverride}
+                    onContextMenu={setContextMenu}
+                  />
+                ))
+              }
+            </>
             : tagGroups.map(tg => (
                 <TagGroup
                   key={tg.tag || '__untagged__'}

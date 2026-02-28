@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import { Tag, Plus, X } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { getAutoPaletteColor } from '@/lib/nodeColors'
 
 export default function TagsTab() {
-  const { tagPresets, addTagPreset, removeTagPreset } = useSettingsStore()
+  const { tagPresets, addTagPreset, removeTagPreset, tagColors, setTagColor } = useSettingsStore()
   const [input, setInput] = useState('')
 
   const handleAdd = () => {
     const trimmed = input.trim()
     if (!trimmed) return
     addTagPreset(trimmed)
+    // 기존에 색상이 지정되지 않은 경우에만 자동 팔레트 색상 배정
+    if (!tagColors[trimmed]) setTagColor(trimmed, getAutoPaletteColor(trimmed))
     setInput('')
   }
 
@@ -36,39 +39,60 @@ export default function TagsTab() {
           </div>
         ) : (
           <div className="flex flex-wrap gap-2 mb-4">
-            {tagPresets.map(tag => (
-              <span
-                key={tag}
-                className="inline-flex items-center gap-1.5 rounded"
-                style={{
-                  fontSize: 12,
-                  color: 'var(--color-accent)',
-                  background: 'var(--color-bg-active)',
-                  padding: '3px 8px 3px 10px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                }}
-              >
-                #{tag}
-                <button
-                  onClick={() => removeTagPreset(tag)}
-                  title={`"${tag}" 제거`}
+            {tagPresets.map(tag => {
+              const customColor = tagColors[tag]
+              return (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1.5 rounded"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--color-text-muted)',
-                    cursor: 'pointer',
-                    padding: 0,
-                    lineHeight: 1,
+                    fontSize: 12,
+                    color: customColor ?? 'var(--color-accent)',
+                    background: 'var(--color-bg-active)',
+                    padding: '3px 8px 3px 6px',
+                    border: `1px solid ${customColor ? customColor + '55' : 'rgba(255,255,255,0.08)'}`,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
                 >
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
+                  {/* Color picker swatch */}
+                  <label
+                    title={`"${tag}" 노드 색상 변경`}
+                    style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    <span style={{
+                      width: 10, height: 10, borderRadius: 2, display: 'inline-block',
+                      background: customColor ?? 'var(--color-accent)',
+                      border: '1px solid rgba(255,255,255,0.3)',
+                      boxShadow: customColor ? `0 0 4px ${customColor}66` : undefined,
+                    }} />
+                    <input
+                      type="color"
+                      value={customColor ?? '#60a5fa'}
+                      onChange={e => setTagColor(tag, e.target.value)}
+                      style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', padding: 0, border: 'none' }}
+                    />
+                  </label>
+                  #{tag}
+                  <button
+                    onClick={() => removeTagPreset(tag)}
+                    title={`"${tag}" 제거`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--color-text-muted)',
+                      cursor: 'pointer',
+                      padding: 0,
+                      lineHeight: 1,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              )
+            })}
           </div>
         )}
 

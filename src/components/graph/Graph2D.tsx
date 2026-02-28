@@ -19,10 +19,12 @@ export default function Graph2D({ width, height }: Props) {
   const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, physics } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const colorRules = useSettingsStore(s => s.colorRules)
+  const tagColors = useSettingsStore(s => s.tagColors)
+  const folderColors = useSettingsStore(s => s.folderColors)
 
   const nodeColorMap = useMemo(
-    () => buildNodeColorMap(nodes, nodeColorMode),
-    [nodes, nodeColorMode]
+    () => buildNodeColorMap(nodes, nodeColorMode, tagColors, folderColors),
+    [nodes, nodeColorMode, tagColors, folderColors]
   )
 
   // DOM refs — updated imperatively in simulation tick (avoids React re-render per frame)

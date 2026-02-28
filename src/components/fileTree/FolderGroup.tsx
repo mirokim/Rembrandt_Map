@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronRight, ChevronDown, Folder } from 'lucide-react'
 import type { MockDocument, LoadedDocument } from '@/types'
 import FileTreeItem from './FileTreeItem'
 import type { ContextMenuState } from './ContextMenu'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 interface FolderGroupProps {
   folderPath: string
@@ -19,6 +20,9 @@ export default function FolderGroup({
   onContextMenu,
 }: FolderGroupProps) {
   const [localOpen, setLocalOpen] = useState(true)
+  const { folderColors, setFolderColor } = useSettingsStore()
+  const colorInputRef = useRef<HTMLInputElement>(null)
+  const customColor = folderColors[folderPath]
 
   // Sync local state when override changes
   useEffect(() => {
@@ -32,8 +36,6 @@ export default function FolderGroup({
     : localOpen
 
   const handleToggle = useCallback(() => setLocalOpen(o => !o), [])
-
-  if (docs.length === 0) return null
 
   const displayName = folderPath || '/'
 
@@ -50,7 +52,7 @@ export default function FolderGroup({
           className="flex items-center justify-center w-4 h-4 rounded"
           style={{ background: 'var(--color-bg-active)' }}
         >
-          <Folder size={9} style={{ color: 'var(--color-accent)' }} />
+          <Folder size={9} style={{ color: customColor ?? 'var(--color-accent)' }} />
         </span>
 
         <span className="flex-1 text-left text-[11px]">{displayName}</span>
@@ -58,6 +60,28 @@ export default function FolderGroup({
         <span style={{ color: 'var(--color-text-muted)' }} className="text-[10px]">
           {docs.length}
         </span>
+
+        {/* Color picker — stopPropagation prevents toggling the folder open/close */}
+        <label
+          onClick={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          title={`"${displayName}" 폴더 색상 변경`}
+          style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 14, height: 14, flexShrink: 0 }}
+        >
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', display: 'inline-block',
+            background: customColor ?? 'var(--color-text-muted)',
+            border: `1px solid ${customColor ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)'}`,
+            opacity: customColor ? 1 : 0.5,
+          }} />
+          <input
+            ref={colorInputRef}
+            type="color"
+            value={customColor ?? '#60a5fa'}
+            onChange={e => setFolderColor(folderPath, e.target.value)}
+            style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', padding: 0, border: 'none' }}
+          />
+        </label>
 
         {isOpen
           ? <ChevronDown size={11} style={{ color: 'var(--color-text-muted)' }} />
@@ -67,9 +91,15 @@ export default function FolderGroup({
 
       {isOpen && (
         <div>
-          {docs.map(doc => (
-            <FileTreeItem key={(doc as LoadedDocument).absolutePath ?? doc.id} doc={doc} onContextMenu={onContextMenu} />
-          ))}
+          {docs.length === 0 ? (
+            <div style={{ padding: '4px 12px 4px 24px', fontSize: 10, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+              비어 있음
+            </div>
+          ) : (
+            docs.map(doc => (
+              <FileTreeItem key={(doc as LoadedDocument).absolutePath ?? doc.id} doc={doc} onContextMenu={onContextMenu} />
+            ))
+          )}
         </div>
       )}
     </div>

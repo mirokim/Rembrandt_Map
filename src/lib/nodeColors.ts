@@ -92,6 +92,14 @@ function buildColorMap(keys: string[]): Map<string, string> {
 }
 
 /**
+ * Return the deterministic auto-palette color for a given key string.
+ * Useful for pre-assigning a default color when creating a new tag.
+ */
+export function getAutoPaletteColor(key: string): string {
+  return AUTO_PALETTE[hashIndex(key, AUTO_PALETTE.length)]
+}
+
+/**
  * Get a hex color for a node based on the current color mode.
  * Falls back to the speaker color for phantom nodes / missing data.
  */
@@ -150,10 +158,14 @@ export function getNodeColor(
  * Build the color lookup map for a set of nodes and a given mode.
  * For 'speaker' mode the map is empty (colors come from SPEAKER_CONFIG directly).
  * For 'auto' mode, keys are namespaced: 'tag:X', 'folder:X', 'topic:X'.
+ *
+ * userTagColors / userFolderColors override auto-palette assignments.
  */
 export function buildNodeColorMap(
   nodes: GraphNode[],
-  mode: NodeColorMode
+  mode: NodeColorMode,
+  userTagColors?: Record<string, string>,
+  userFolderColors?: Record<string, string>
 ): Map<string, string> {
   if (mode === 'document') {
     const docIds = nodes.map(n => n.docId)
@@ -167,15 +179,38 @@ export function buildNodeColorMap(
       if (n.folderPath) return 'folder:' + n.folderPath
       return 'topic:' + extractTopic(n.label)
     })
-    return buildColorMap(keys)
+    const map = buildColorMap(keys)
+    if (userTagColors) {
+      for (const [tag, color] of Object.entries(userTagColors)) {
+        if (color) map.set('tag:' + tag, color)
+      }
+    }
+    if (userFolderColors) {
+      for (const [folder, color] of Object.entries(userFolderColors)) {
+        if (color) map.set('folder:' + folder, color)
+      }
+    }
+    return map
   }
   if (mode === 'folder') {
     const folders = nodes.map(n => n.folderPath ?? '')
-    return buildColorMap(folders)
+    const map = buildColorMap(folders)
+    if (userFolderColors) {
+      for (const [folder, color] of Object.entries(userFolderColors)) {
+        if (color) map.set(folder, color)
+      }
+    }
+    return map
   }
   if (mode === 'tag') {
     const tags = nodes.flatMap(n => n.tags ?? [])
-    return buildColorMap(tags)
+    const map = buildColorMap(tags)
+    if (userTagColors) {
+      for (const [tag, color] of Object.entries(userTagColors)) {
+        if (color) map.set(tag, color)
+      }
+    }
+    return map
   }
   if (mode === 'topic') {
     const topics = nodes.map(n => extractTopic(n.label))
