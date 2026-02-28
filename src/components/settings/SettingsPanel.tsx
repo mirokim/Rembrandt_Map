@@ -12,7 +12,7 @@ import {
   X, BarChart2, Clock, Download, Trash2,
   Settings, Cpu, GitMerge, Keyboard, Info,
   Layers, Palette, FileCode,
-  Users,
+  Users, Tag,
 } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import ConverterEditor from '@/components/converter/ConverterEditor'
@@ -24,12 +24,13 @@ import DebateTab from './tabs/DebateTab'
 import ProjectTab from './tabs/ProjectTab'
 import ColorsTab from './tabs/ColorsTab'
 import AboutTab from './tabs/AboutTab'
+import TagsTab from './tabs/TagsTab'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SettingsTab =
   | 'stats' | 'timeline' | 'export' | 'trash' | 'converter'
-  | 'general' | 'ai' | 'personas' | 'debate' | 'shortcuts' | 'project' | 'colors'
+  | 'general' | 'ai' | 'personas' | 'debate' | 'shortcuts' | 'project' | 'colors' | 'tags'
   | 'about'
 
 type NavItem = { id: SettingsTab; icon: React.ElementType; label: string }
@@ -53,6 +54,7 @@ const NAV: NavGroup[] = [
     items: [
       { id: 'general',   icon: Settings,  label: '일반' },
       { id: 'ai',        icon: Cpu,       label: 'AI 설정' },
+      { id: 'tags',      icon: Tag,       label: '태그' },
       { id: 'personas',  icon: Users,     label: '페르소나' },
       { id: 'project',   icon: Layers,    label: '프로젝트' },
       { id: 'colors',    icon: Palette,   label: '색상 규칙' },
@@ -91,6 +93,7 @@ function renderTabContent(tab: SettingsTab) {
     case 'project':   return <ProjectTab />
     case 'colors':    return <ColorsTab />
     case 'debate':    return <DebateTab />
+    case 'tags':      return <TagsTab />
     case 'about':     return <AboutTab />
     default:          return <PlaceholderContent label={ALL_ITEMS.find(i => i.id === tab)?.label ?? tab} />
   }

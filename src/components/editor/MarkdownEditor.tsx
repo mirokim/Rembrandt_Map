@@ -17,7 +17,7 @@ import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
 import matter from 'gray-matter'
-import { ArrowLeft, Save, CheckCircle, AlertCircle, X, Lock, Unlock, Pencil } from 'lucide-react'
+import { ArrowLeft, Save, CheckCircle, AlertCircle, X, Lock, Unlock, Pencil, Wand2, RotateCcw, Loader2 } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
@@ -158,6 +158,9 @@ export default function MarkdownEditor() {
   const [localTags, setLocalTags] = useState<string[]>(doc?.tags ?? [])
   const [isAddingTag, setIsAddingTag] = useState(false)
   const [tagInput, setTagInput] = useState('')
+  const [previousTags, setPreviousTags] = useState<string[] | null>(null)
+  const [isSuggestingTags, setIsSuggestingTags] = useState(false)
+  const [suggestedTags, setSuggestedTags] = useState<string[] | null>(null)
   const [wikiSuggest, setWikiSuggest] = useState<WikiSuggestState | null>(null)
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
@@ -516,11 +519,15 @@ export default function MarkdownEditor() {
     setLocalTags(doc?.tags ?? [])
     setIsAddingTag(false)
     setTagInput('')
+    setPreviousTags(null)
+    setSuggestedTags(null)
+    setIsSuggestingTags(false)
   }, [doc?.id])
 
   // ── 태그 편집 ──────────────────────────────────────────────────────────────
 
-  const handleTagChange = useCallback((newTags: string[]) => {
+  const handleTagChange = useCallback((newTags: string[], saveUndo = true) => {
+    if (saveUndo) setPreviousTags(localTags)
     setLocalTags(newTags)
     const currentRaw = viewRef.current?.state.doc.toString() ?? ''
     const newRaw = updateFrontmatterTags(currentRaw, newTags)
@@ -529,7 +536,7 @@ export default function MarkdownEditor() {
         changes: { from: 0, to: viewRef.current.state.doc.length, insert: newRaw },
       })
     }
-  }, [])
+  }, [localTags])
 
   const commitTag = useCallback(() => {
     const trimmed = tagInput.trim()
@@ -537,6 +544,28 @@ export default function MarkdownEditor() {
     setTagInput('')
     setIsAddingTag(false)
   }, [tagInput, localTags, handleTagChange])
+
+  const handleUndoTags = useCallback(() => {
+    if (previousTags === null) return
+    handleTagChange(previousTags, false)
+    setPreviousTags(null)
+  }, [previousTags, handleTagChange])
+
+  const handleSuggestTags = useCallback(async () => {
+    setIsSuggestingTags(true)
+    setSuggestedTags(null)
+    try {
+      const raw = viewRef.current?.state.doc.toString() ?? docRef.current?.rawContent ?? ''
+      const filename = (docRef.current as LoadedDocument)?.filename ?? ''
+      const { suggestTagsForDoc } = await import('@/services/tagService')
+      const tags = await suggestTagsForDoc(filename, raw)
+      setSuggestedTags(tags)
+    } catch {
+      setSuggestedTags([])
+    } finally {
+      setIsSuggestingTags(false)
+    }
+  }, [])
 
   // ── 문서 없음 ─────────────────────────────────────────────────────────────
 
@@ -709,6 +738,61 @@ export default function MarkdownEditor() {
                 >
                   + 태그
                 </button>
+          )}
+
+          {!isLocked && !isAddingTag && (
+            <button
+              onClick={handleSuggestTags}
+              disabled={isSuggestingTags}
+              style={{ display: 'flex', alignItems: 'center', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: isSuggestingTags ? 'default' : 'pointer', padding: '1px 4px', borderRadius: 3, transition: 'color 0.1s', opacity: isSuggestingTags ? 0.5 : 1 }}
+              onMouseEnter={e => { if (!isSuggestingTags) e.currentTarget.style.color = 'var(--color-accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+              title="AI 태그 제안"
+            >
+              {isSuggestingTags ? <Loader2 size={10} /> : <Wand2 size={10} />}
+            </button>
+          )}
+
+          {!isLocked && previousTags !== null && (
+            <button
+              onClick={handleUndoTags}
+              style={{ display: 'flex', alignItems: 'center', background: 'transparent', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', padding: '1px 4px', borderRadius: 3, transition: 'color 0.1s' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-text-primary)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+              title="태그 되돌리기"
+            >
+              <RotateCcw size={10} />
+            </button>
+          )}
+
+          {suggestedTags !== null && (
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 5, paddingTop: 3 }}>
+              <span style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>제안:</span>
+              {suggestedTags.length === 0
+                ? <span style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>적합한 태그 없음</span>
+                : suggestedTags.map(t => (
+                    <span key={t} style={{ fontSize: 10, color: 'var(--color-accent)', background: 'var(--color-bg-active)', borderRadius: 3, padding: '1px 5px' }}>#{t}</span>
+                  ))
+              }
+              {suggestedTags.length > 0 && (
+                <button
+                  onClick={() => { handleTagChange(suggestedTags); setSuggestedTags(null) }}
+                  style={{ fontSize: 10, color: 'var(--color-text-muted)', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', padding: '1px 5px', borderRadius: 3, transition: 'color 0.1s' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-text-primary)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+                >
+                  적용
+                </button>
+              )}
+              <button
+                onClick={() => setSuggestedTags(null)}
+                style={{ fontSize: 10, color: 'var(--color-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 3, transition: 'color 0.1s' }}
+                onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-text-primary)')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-text-muted)')}
+              >
+                취소
+              </button>
+            </div>
           )}
         </div>
       )}

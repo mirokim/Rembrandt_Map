@@ -68,6 +68,8 @@ interface SettingsState {
   disabledPersonaIds: string[]
   /** Whether markdown editor opens in locked (read-only) mode by default */
   editorDefaultLocked: boolean
+  /** Allowed tag names for AI tag suggestion */
+  tagPresets: string[]
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -91,6 +93,8 @@ interface SettingsState {
   /** Reset all persona state to defaults (called when loading a vault with no config) */
   resetVaultPersonas: () => void
   setEditorDefaultLocked: (locked: boolean) => void
+  addTagPreset: (tag: string) => void
+  removeTagPreset: (tag: string) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -134,6 +138,7 @@ export const useSettingsStore = create<SettingsState>()(
       personaPromptOverrides: {},
       disabledPersonaIds: [],
       editorDefaultLocked: false,
+      tagPresets: [],
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -224,6 +229,14 @@ export const useSettingsStore = create<SettingsState>()(
         }),
 
       setEditorDefaultLocked: (editorDefaultLocked) => set({ editorDefaultLocked }),
+
+      addTagPreset: (tag) =>
+        set((s) => ({
+          tagPresets: s.tagPresets.includes(tag) ? s.tagPresets : [...s.tagPresets, tag],
+        })),
+
+      removeTagPreset: (tag) =>
+        set((s) => ({ tagPresets: s.tagPresets.filter(t => t !== tag) })),
     }),
     {
       name: 'rembrandt-settings',
@@ -238,6 +251,7 @@ export const useSettingsStore = create<SettingsState>()(
         personaPromptOverrides: state.personaPromptOverrides,
         disabledPersonaIds: state.disabledPersonaIds,
         editorDefaultLocked: state.editorDefaultLocked,
+        tagPresets: state.tagPresets,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {
