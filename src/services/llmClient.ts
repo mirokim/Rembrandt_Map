@@ -1,5 +1,6 @@
 import type { ChatMessage, SpeakerId, DirectorId, Attachment } from '@/types'
 import type { ConversionMeta } from '@/lib/mdConverter'
+import { logger } from '@/lib/logger'
 import { MODEL_OPTIONS, getProviderForModel } from '@/lib/modelConfig'
 import { PERSONA_PROMPTS, buildProjectContext } from '@/lib/personaPrompts'
 import { selectMockResponse } from '@/data/mockResponses'
@@ -200,7 +201,7 @@ export async function fetchRAGContext(
       candidates = frontendKeywordSearch(userMessage, 8)
     }
 
-    console.log(`[RAG] 검색 후보: ${candidates.length}개 (쿼리: "${userMessage.slice(0, 40)}")`)
+    logger.debug(`[RAG] 검색 후보: ${candidates.length}개 (쿼리: "${userMessage.slice(0, 40)}")`)
 
     // Stage 2: Filter by minimum similarity (완화된 임계값 0.05)
     // 이전 0.15는 너무 엄격하여 제목이 조금만 달라도 누락됨
@@ -215,11 +216,11 @@ export async function fetchRAGContext(
     // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
     // queryTerms 전달 → 패시지-레벨 검색으로 각 문서의 가장 관련된 섹션 선택
     const ctx = buildDeepGraphContext(reranked, 3, 20, tokenizeQuery(userMessage))
-    console.log(`[RAG] 컨텍스트 생성 완료: ${ctx.length}자`)
+    logger.debug(`[RAG] 컨텍스트 생성 완료: ${ctx.length}자`)
     return ctx
   } catch (err) {
     // RAG failure is non-fatal — continue without context
-    console.error('[RAG] fetchRAGContext 오류:', err)
+    logger.error('[RAG] fetchRAGContext 오류:', err)
     return ''
   }
 }

@@ -7,6 +7,7 @@
 
 import matter from 'gray-matter'
 import type { VaultFile, LoadedDocument, DocSection, SpeakerId } from '@/types'
+import { logger } from '@/lib/logger'
 import { slugify, extractWikiLinks } from '@/lib/utils'
 
 // ── Valid speaker IDs for validation ──────────────────────────────────────────
@@ -188,7 +189,7 @@ export function parseVaultFiles(files: VaultFile[]): LoadedDocument[] {
         let n = 2
         while (seenIds.has(`${doc.id}_${n}`)) n++
         const newId = `${doc.id}_${n}`
-        console.warn(`[markdownParser] ID 충돌: "${doc.id}" (${file.relativePath}) → "${newId}"`)
+        logger.warn(`[markdownParser] ID 충돌: "${doc.id}" (${file.relativePath}) → "${newId}"`)
         results.push({ ...doc, id: newId })
         seenIds.add(newId)
       } else {
@@ -196,7 +197,7 @@ export function parseVaultFiles(files: VaultFile[]): LoadedDocument[] {
         results.push(doc)
       }
     } catch (err) {
-      console.warn(`[markdownParser] Failed to parse ${file.relativePath}:`, err)
+      logger.warn(`[markdownParser] Failed to parse ${file.relativePath}:`, err)
     }
   }
   return results

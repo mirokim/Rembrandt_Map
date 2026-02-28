@@ -16,6 +16,7 @@
 import type { SearchResult, GraphLink, LoadedDocument, DocSection } from '@/types'
 import { useGraphStore } from '@/stores/graphStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { logger } from '@/lib/logger'
 import {
   tfidfIndex,
   getGraphMetrics,
@@ -34,41 +35,9 @@ export interface NeighborContext {
   filename: string
 }
 
-// ── Korean tokenization helpers ──────────────────────────────────────────────
-
-/**
- * Common Korean particles/suffixes sorted longest-first for greedy stripping.
- * Stripping these from query tokens vastly improves keyword matching
- * against vault documents (e.g. "스칼렛이라는" → "스칼렛").
- */
-const KO_SUFFIXES = [
-  '이라는', '이라고', '에서는', '에게서', '한테서', '으로서', '으로써', '으로는',
-  '에서의', '으로의', '에서도', '으로도',
-  '이라', '에서', '에게', '한테', '까지', '부터', '처럼', '같은', '같이',
-  '만큼', '으로', '이랑', '라는', '라고', '이란', '에는', '하고',
-  '은', '는', '이', '가', '을', '를', '와', '과',
-  '에', '도', '만', '의', '로',
-]
-
-/**
- * Strip Korean particles from a token to extract the stem.
- * Returns an array of [original, stem] (deduplicated).
- * Only strips if the remaining stem is >= 2 characters.
- */
-function stemKorean(token: string): string[] {
-  const results = [token]
-  for (const suffix of KO_SUFFIXES) {
-    if (token.endsWith(suffix) && token.length > suffix.length + 1) {
-      results.push(token.slice(0, -suffix.length))
-      break // greedy: strip longest matching suffix only
-    }
-  }
-  return [...new Set(results)]
-}
-
 /**
  * Tokenize a Korean/English query string into search stems.
- * Delegates to graphAnalysis.tokenize (shared implementation).
+ * graphAnalysis.tokenize 위임 — 한국어 조사 제거 포함.
  * Exported so llmClient.ts can pass query terms to context builders.
  */
 export function tokenizeQuery(text: string): string[] {
@@ -525,7 +494,7 @@ export function buildDeepGraphContext(
   const { links } = useGraphStore.getState()
   const { loadedDocuments } = useVaultStore.getState()
   if (!loadedDocuments?.length) {
-    console.warn('[RAG] loadedDocuments 없음 — 볼트가 로드되지 않았습니다')
+    logger.warn('[RAG] loadedDocuments 없음 — 볼트가 로드되지 않았습니다')
     return ''
   }
 
@@ -603,7 +572,7 @@ export function buildDeepGraphContext(
     docHits++
   }
 
-  console.log(`[RAG] BFS 완료: visited=${visited.size}, 콘텐츠 포함=${docHits}개, 총 ${charCount}자`)
+  logger.debug(`[RAG] BFS 완료: visited=${visited.size}, 콘텐츠 포함=${docHits}개, 총 ${charCount}자`)
 
   // 실제 문서 콘텐츠가 하나도 없으면 TF-IDF 결과 직접 포맷으로 폴백
   if (docHits === 0) {

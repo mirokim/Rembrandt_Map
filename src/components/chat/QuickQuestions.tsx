@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useChatStore } from '@/stores/chatStore'
 
 const QUICK_QUESTIONS = [
@@ -9,25 +10,32 @@ const QUICK_QUESTIONS = [
   '성능 최적화 현황을 요약해주세요.',
 ]
 
-export default function QuickQuestions() {
-  const { sendMessage } = useChatStore()
+const BTN_STYLE: React.CSSProperties = {
+  background: 'var(--color-bg-secondary)',
+  color: 'var(--color-text-secondary)',
+  border: '1px solid var(--color-border)',
+}
 
+function QuickQuestionButton({ question, index }: { question: string; index: number }) {
+  const sendMessage = useChatStore(s => s.sendMessage)
+  const handleClick = useCallback(() => sendMessage(question), [sendMessage, question])
+  return (
+    <button
+      onClick={handleClick}
+      data-testid={`quick-q-${index}`}
+      className="text-xs px-2.5 py-1 rounded-full transition-colors hover:opacity-80"
+      style={BTN_STYLE}
+    >
+      {question}
+    </button>
+  )
+}
+
+export default function QuickQuestions() {
   return (
     <div className="flex flex-wrap gap-1.5" data-testid="quick-questions">
       {QUICK_QUESTIONS.map((q, i) => (
-        <button
-          key={i}
-          onClick={() => sendMessage(q)}
-          data-testid={`quick-q-${i}`}
-          className="text-xs px-2.5 py-1 rounded-full transition-colors hover:opacity-80"
-          style={{
-            background: 'var(--color-bg-secondary)',
-            color: 'var(--color-text-secondary)',
-            border: '1px solid var(--color-border)',
-          }}
-        >
-          {q}
-        </button>
+        <QuickQuestionButton key={i} question={q} index={i} />
       ))}
     </div>
   )

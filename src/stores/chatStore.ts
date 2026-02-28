@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ChatMessage, SpeakerId, Attachment } from '@/types'
 import { generateId } from '@/lib/utils'
+import { STREAM_STAGGER_MS } from '@/lib/constants'
 import { streamMessage } from '@/services/llmClient'
 import { SPEAKER_IDS } from '@/lib/speakerConfig'
 
@@ -69,7 +70,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Stream all personas concurrently (with small staggered start)
     const streamingPromises = personasToRespond.map(async (persona, i) => {
       // Small staggered delay so messages appear sequentially
-      await new Promise<void>((r) => setTimeout(r, i * 100))
+      await new Promise<void>((r) => setTimeout(r, i * STREAM_STAGGER_MS))
 
       // Create placeholder message with streaming: true
       const assistantMsgId = generateId()

@@ -11,6 +11,7 @@
  */
 
 import type { GraphNode, GraphLink, MockDocument, LoadedDocument, SpeakerId } from '@/types'
+import { DEFAULT_LINK_STRENGTH } from '@/lib/constants'
 import { slugify, truncate } from '@/lib/utils'
 
 // Internal union type — both shapes are structurally compatible
@@ -116,7 +117,7 @@ export function buildGraphLinks(
         const key = [doc.id, targetDocId].sort().join('→')
         if (seen.has(key)) continue
         seen.add(key)
-        links.push({ source: doc.id, target: targetDocId, strength: 0.5 })
+        links.push({ source: doc.id, target: targetDocId, strength: DEFAULT_LINK_STRENGTH })
       }
     }
   }

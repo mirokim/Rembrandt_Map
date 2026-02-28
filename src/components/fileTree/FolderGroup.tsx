@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { ChevronRight, ChevronDown, Folder } from 'lucide-react'
 import type { MockDocument, LoadedDocument } from '@/types'
 import FileTreeItem from './FileTreeItem'
@@ -31,6 +31,8 @@ export default function FolderGroup({
     ? isOpenOverride
     : localOpen
 
+  const handleToggle = useCallback(() => setLocalOpen(o => !o), [])
+
   if (docs.length === 0) return null
 
   const displayName = folderPath || '/'
@@ -38,7 +40,7 @@ export default function FolderGroup({
   return (
     <div>
       <button
-        onClick={() => setLocalOpen(o => !o)}
+        onClick={handleToggle}
         className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-semibold transition-colors hover:bg-[var(--color-bg-hover)]"
         style={{ color: 'var(--color-text-primary)' }}
         aria-expanded={isOpen}

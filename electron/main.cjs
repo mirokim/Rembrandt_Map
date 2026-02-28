@@ -68,6 +68,10 @@ function stopPythonBackend() {
   }
 }
 
+// ── Vault path tracking (for IPC security validation) ─────────────────────────
+/** 현재 로드된 볼트의 절대 경로 — vault:load-files 시 갱신 */
+let currentVaultPath = null
+
 // ── Vault IPC helpers (Phase 6) ────────────────────────────────────────────────
 
 /**
@@ -151,6 +155,7 @@ function registerVaultIpcHandlers() {
       throw new Error(`볼트 경로가 존재하지 않습니다: ${resolvedVault}`)
     }
 
+    currentVaultPath = resolvedVault
     const filePaths = collectMarkdownFiles(resolvedVault, resolvedVault)
     console.log(`[vault] ${filePaths.length}개 .md 파일 발견 (${resolvedVault})`)
 
@@ -207,6 +212,9 @@ function registerVaultIpcHandlers() {
     if (!filePath || typeof filePath !== 'string') throw new Error('Invalid file path')
     if (typeof content !== 'string') throw new Error('Invalid content')
     const resolved = path.resolve(filePath)
+    if (currentVaultPath && !isInsideVault(currentVaultPath, resolved)) {
+      throw new Error(`보안 오류: 볼트 외부 경로에 쓸 수 없습니다 (${resolved})`)
+    }
     fs.mkdirSync(path.dirname(resolved), { recursive: true })
     fs.writeFileSync(resolved, content, 'utf-8')
     return { success: true, path: resolved }
@@ -217,6 +225,9 @@ function registerVaultIpcHandlers() {
     if (!absolutePath || typeof absolutePath !== 'string') throw new Error('Invalid path')
     if (!newFilename || typeof newFilename !== 'string') throw new Error('Invalid filename')
     const resolved = path.resolve(absolutePath)
+    if (currentVaultPath && !isInsideVault(currentVaultPath, resolved)) {
+      throw new Error(`보안 오류: 볼트 외부 파일은 이름 변경할 수 없습니다 (${resolved})`)
+    }
     if (!fs.existsSync(resolved)) throw new Error(`파일이 존재하지 않습니다: ${resolved}`)
     const dir = path.dirname(resolved)
     const newPath = path.join(dir, newFilename)
@@ -228,6 +239,9 @@ function registerVaultIpcHandlers() {
   ipcMain.handle('vault:delete-file', (_event, absolutePath) => {
     if (!absolutePath || typeof absolutePath !== 'string') throw new Error('Invalid path')
     const resolved = path.resolve(absolutePath)
+    if (currentVaultPath && !isInsideVault(currentVaultPath, resolved)) {
+      throw new Error(`보안 오류: 볼트 외부 파일은 삭제할 수 없습니다 (${resolved})`)
+    }
     if (!fs.existsSync(resolved)) throw new Error(`파일이 존재하지 않습니다: ${resolved}`)
     fs.unlinkSync(resolved)
     return { success: true }

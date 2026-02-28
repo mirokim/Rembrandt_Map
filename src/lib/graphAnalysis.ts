@@ -11,6 +11,7 @@
  */
 
 import type { LoadedDocument } from '@/types'
+import { logger } from '@/lib/logger'
 
 // ── 공유 토크나이저 ──────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ export class TfIdfIndex {
     this._implicitAdjRef = null
 
     this.built = true
-    console.log(`[graphAnalysis] TF-IDF 인덱스 빌드 완료: ${this.docs.length}개 문서`)
+    logger.debug(`[graphAnalysis] TF-IDF 인덱스 빌드 완료: ${this.docs.length}개 문서`)
   }
 
   search(query: string, topN: number = 8): TfIdfResult[] {
@@ -257,7 +258,7 @@ export class TfIdfIndex {
     pairs.sort((a, b) => b.similarity - a.similarity)
     this._implicitLinks = pairs
     this._implicitAdjRef = adjacency
-    console.log(`[graphAnalysis] 묵시적 연결 ${pairs.length}쌍 발견 (threshold=${threshold})`)
+    logger.debug(`[graphAnalysis] 묵시적 연결 ${pairs.length}쌍 발견 (threshold=${threshold})`)
 
     return pairs.slice(0, topN)
   }

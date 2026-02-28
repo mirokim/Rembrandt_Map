@@ -17,6 +17,23 @@ import ContextMenu from './ContextMenu'
 import type { SpeakerId, LoadedDocument } from '@/types'
 import type { ContextMenuState } from './ContextMenu'
 
+function iconBtn(active = false): React.CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 22,
+    height: 22,
+    border: 'none',
+    background: active ? 'var(--color-bg-active)' : 'transparent',
+    borderRadius: 4,
+    color: active ? 'var(--color-accent)' : 'var(--color-text-muted)',
+    cursor: 'pointer',
+    flexShrink: 0,
+    transition: 'background 0.1s, color 0.1s',
+  }
+}
+
 export default function FileTree() {
   const {
     search, setSearch,
@@ -41,8 +58,8 @@ export default function FileTree() {
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
-  const handleExpandAll = () => setExpandOverride(true)
-  const handleCollapseAll = () => setExpandOverride(false)
+  const handleExpandAll = useCallback(() => setExpandOverride(true), [])
+  const handleCollapseAll = useCallback(() => setExpandOverride(false), [])
   // After an individual group is toggled, clear the override so each group owns its state again
   const handleGroupToggle = useCallback(() => {
     if (expandOverride !== null) setExpandOverride(null)
@@ -165,22 +182,6 @@ export default function FileTree() {
       console.error('[FileTree] new document failed:', e)
     }
   }
-
-  // ── Icon button style ──────────────────────────────────────────────────────
-  const iconBtn = (active = false): React.CSSProperties => ({
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 22,
-    height: 22,
-    border: 'none',
-    background: active ? 'var(--color-bg-active)' : 'transparent',
-    borderRadius: 4,
-    color: active ? 'var(--color-accent)' : 'var(--color-text-muted)',
-    cursor: 'pointer',
-    flexShrink: 0,
-    transition: 'background 0.1s, color 0.1s',
-  })
 
   return (
     <div className="flex flex-col h-full" data-testid="file-tree">

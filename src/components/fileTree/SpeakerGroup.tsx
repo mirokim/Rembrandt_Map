@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { ChevronRight, ChevronDown, Folder } from 'lucide-react'
 import type { MockDocument, SpeakerId } from '@/types'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
@@ -31,13 +31,15 @@ export default function SpeakerGroup({
     ? isOpenOverride
     : localOpen
 
+  const handleToggle = useCallback(() => setLocalOpen(o => !o), [])
+
   if (docs.length === 0) return null
 
   return (
     <div>
       {/* Group header */}
       <button
-        onClick={() => setLocalOpen(o => !o)}
+        onClick={handleToggle}
         className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-semibold transition-colors hover:bg-[var(--color-bg-hover)]"
         style={{ color }}
         aria-expanded={isOpen}

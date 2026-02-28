@@ -8,6 +8,8 @@
  */
 
 import { useEffect, useRef } from 'react'
+import { PERSONA_CONFIG_PATH } from '@/lib/constants'
+import { logger } from '@/lib/logger'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { stringifyPersonaConfig, type VaultPersonaConfig } from '@/lib/personaVaultConfig'
@@ -38,12 +40,12 @@ export function usePersonaVaultSaver() {
         customPersonas,
       }
       const content = stringifyPersonaConfig(config)
-      const configPath = `${vaultPath}/.rembrant/personas.md`
+      const configPath = `${vaultPath}/${PERSONA_CONFIG_PATH}`
       try {
         await window.vaultAPI!.saveFile(configPath, content)
-        console.log('[persona] vault 설정 저장됨:', configPath)
+        logger.debug('[persona] vault 설정 저장됨:', configPath)
       } catch (err) {
-        console.warn('[persona] vault 설정 저장 실패:', err)
+        logger.warn('[persona] vault 설정 저장 실패:', err)
       }
     }, DEBOUNCE_MS)
 

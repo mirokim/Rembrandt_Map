@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 
 interface ResizeHandleProps {
   onResize: (delta: number) => void
@@ -7,6 +7,12 @@ interface ResizeHandleProps {
 export default function ResizeHandle({ onResize }: ResizeHandleProps) {
   const isDragging = useRef(false)
   const lastX = useRef(0)
+  const cleanupRef = useRef<(() => void) | null>(null)
+
+  // 드래그 중 컴포넌트가 언마운트될 경우 리스너 정리
+  useEffect(() => {
+    return () => { cleanupRef.current?.() }
+  }, [])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     isDragging.current = true
@@ -21,16 +27,18 @@ export default function ResizeHandle({ onResize }: ResizeHandleProps) {
       onResize(delta)
     }
 
-    const handleMouseUp = () => {
+    const cleanup = () => {
       isDragging.current = false
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('mouseup', cleanup)
+      cleanupRef.current = null
     }
 
+    cleanupRef.current = cleanup
     window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('mouseup', cleanup)
   }, [onResize])
 
   return (

@@ -7,6 +7,8 @@
  */
 
 import { useCallback } from 'react'
+import { PERSONA_CONFIG_PATH } from '@/lib/constants'
+import { logger } from '@/lib/logger'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useBackendStore } from '@/stores/backendStore'
@@ -35,7 +37,7 @@ export function useVaultLoader() {
       setError(null)
       try {
         const files = await window.vaultAPI.loadFiles(dirPath)
-        console.log(`[vault] ${files?.length ?? 0}개 파일 로드됨 (${dirPath})`)
+        logger.debug(`[vault] ${files?.length ?? 0}개 파일 로드됨 (${dirPath})`)
 
         if (!files || files.length === 0) {
           setLoadedDocuments(null)
@@ -45,18 +47,18 @@ export function useVaultLoader() {
         }
 
         const docs = parseVaultFiles(files)
-        console.log(`[vault] ${docs.length}/${files.length}개 문서 파싱 성공`)
+        logger.debug(`[vault] ${docs.length}/${files.length}개 문서 파싱 성공`)
         setLoadedDocuments(docs)
 
         // Load vault-scoped persona config (.rembrant/personas.md)
         try {
-          const configPath = `${dirPath}/.rembrant/personas.md`
+          const configPath = `${dirPath}/${PERSONA_CONFIG_PATH}`
           const configContent = await window.vaultAPI!.readFile(configPath)
           if (configContent) {
             const config = parsePersonaConfig(configContent)
             if (config) {
               loadVaultPersonas(config)
-              console.log('[vault] 페르소나 설정 로드됨')
+              logger.debug('[vault] 페르소나 설정 로드됨')
             } else {
               resetVaultPersonas()
             }
@@ -69,7 +71,7 @@ export function useVaultLoader() {
 
         // Update graph
         const { nodes, links } = buildGraph(docs)
-        console.log(`[vault] 그래프: ${nodes.length}개 노드, ${links.length}개 링크`)
+        logger.debug(`[vault] 그래프: ${nodes.length}개 노드, ${links.length}개 링크`)
         setNodes(nodes)
         setLinks(links)
 
@@ -105,7 +107,7 @@ export function useVaultLoader() {
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '파일 로드 실패'
-        console.error('[vault] 로드 실패:', msg)
+        logger.error('[vault] 로드 실패:', msg)
         setError(msg)
         setLoadedDocuments(null)
         resetToMock()
