@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '@/types'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 
@@ -15,6 +16,7 @@ export default function MessageBubble({ message }: Props) {
     if (isUser) return null
     return (
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           a({ href, children }) {
             return (
@@ -40,7 +42,7 @@ export default function MessageBubble({ message }: Props) {
         data-role="user"
       >
         <div
-          className="max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed"
+          className="max-w-[88%] rounded-lg px-3 py-2 text-sm leading-relaxed"
           style={{
             background: 'var(--color-bg-surface)',
             color: 'var(--color-text-primary)',

@@ -71,7 +71,7 @@ export default function Graph3D({ width, height }: Props) {
   interface HoverState { neighborIds: Set<string>; neighborLinkIdxs: Set<number> }
   const prevHoverStateRef = useRef<HoverState | null>(null)
 
-  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks, physics, aiHighlightNodeIds } = useGraphStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks, physics, aiHighlightNodeIds, setGraphLayoutReady } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
   const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
@@ -349,6 +349,9 @@ export default function Graph3D({ width, height }: Props) {
       css2dRenderer.render(scene, camera)
     }
     animate()
+    // Signal that the 3D scene is initialized and the loading overlay can be dismissed.
+    // setNodes() resets this to false; we restore it once the scene is ready to render.
+    setGraphLayoutReady(true)
 
     return () => {
       graphCallbacks.resetCamera = null
@@ -380,7 +383,7 @@ export default function Graph3D({ width, height }: Props) {
       particlesRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, links])
+  }, [nodes, links, setGraphLayoutReady])
 
   // ── Resize ────────────────────────────────────────────────────────────────
   useEffect(() => {

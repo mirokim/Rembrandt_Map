@@ -14,8 +14,8 @@ import { useSettingsStore } from '@/stores/settingsStore'
 
 const LEFT_MIN = 140
 const LEFT_MAX = 340
-const RIGHT_MIN = 260
-const RIGHT_MAX = 520
+const RIGHT_MIN = 286
+const RIGHT_MAX = 572
 
 const PANEL_SPRING = { type: 'spring', stiffness: 80, damping: 18, delay: 0.15 } as const
 const OVERLAY_TRANSITION = { duration: 0.2 }
@@ -47,7 +47,7 @@ export default function MainLayout() {
         border: '1px solid rgba(255,255,255,0.04)',
       }
   const [leftWidth, setLeftWidth] = useState(186)
-  const [rightWidth, setRightWidth] = useState(360)
+  const [rightWidth, setRightWidth] = useState(500)
 
   const handleLeftResize = useCallback((delta: number) => {
     setLeftWidth(w => Math.min(LEFT_MAX, Math.max(LEFT_MIN, w + delta)))

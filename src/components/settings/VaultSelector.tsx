@@ -27,16 +27,33 @@ export default function VaultSelector() {
   } = useVaultStore()
   const { isIndexing, chunkCount } = useBackendStore()
   const { loadVault } = useVaultLoader()
-  const cleanupWatcherRef = useRef<(() => void) | null>(null)
+
+  // ── Suppress watcher events around explicit load/watchStart calls ─────────
+  // Windows fs.watch can fire spurious events immediately after watchStart.
+  // We suppress vault:changed for 3 s after any explicit load or watchStart.
+  // Note: .rembrant/ writes (personas.md) are already filtered in main.cjs,
+  // so suppressWatch only needs to cover the initial watcher startup window.
+  const suppressWatchRef = useRef(false)
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const suppressWatch = useCallback(() => {
+    if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current)
+    suppressWatchRef.current = true
+    suppressTimerRef.current = setTimeout(() => { suppressWatchRef.current = false }, 3000)
+  }, [])
 
   // ── Subscribe to vault:changed events ────────────────────────────────────
   useEffect(() => {
     if (!window.vaultAPI || !vaultPath) return
-    const cleanup = window.vaultAPI.onChanged(() => {
-      loadVault(vaultPath)
+    return window.vaultAPI.onChanged(() => {
+      // Always read from store — closure vaultPath is stale after clearVault()
+      const currentVaultPath = useVaultStore.getState().vaultPath
+      if (!currentVaultPath) return                                  // vault cleared
+      if (useVaultStore.getState().isLoading) return                 // already loading
+      if (suppressWatchRef.current) return                           // cooldown active
+      if (!useGraphStore.getState().graphLayoutReady) return         // graph not ready yet
+      loadVault(currentVaultPath)
     })
-    cleanupWatcherRef.current = cleanup
-    return cleanup
   }, [vaultPath, loadVault])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -48,6 +65,7 @@ export default function VaultSelector() {
     const selected = await window.vaultAPI.selectFolder()
     if (!selected) return
     setVaultPath(selected)
+    suppressWatch()
     await loadVault(selected)
 
     // If the vault is empty (no .md files), create a default "Project.md"
@@ -70,16 +88,21 @@ export default function VaultSelector() {
       const projectPath = selected.replace(/[/\\]$/, '') + '/Project.md'
       await window.vaultAPI.saveFile(projectPath, defaultContent)
       // Reload vault to pick up the newly created file
+      suppressWatch()
       await loadVault(selected)
     }
 
+    // Reset suppression window right before watchStart to cover the initial watcher events.
+    // For large vaults the earlier suppressWatch() call may have already expired.
+    suppressWatch()
     await window.vaultAPI.watchStart(selected)
-  }, [setVaultPath, loadVault])
+  }, [setVaultPath, loadVault, suppressWatch])
 
   const handleReload = useCallback(async () => {
     if (!vaultPath) return
+    suppressWatch()
     await loadVault(vaultPath)
-  }, [vaultPath, loadVault])
+  }, [vaultPath, loadVault, suppressWatch])
 
   const handleClear = useCallback(async () => {
     window.vaultAPI?.watchStop()

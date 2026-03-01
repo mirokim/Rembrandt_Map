@@ -63,7 +63,7 @@ export const useVaultStore = create<VaultState>()(
         set({ loadingProgress, loadingPhase }),
       setError: (error) => set({ error }),
       clearVault: () =>
-        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], error: null, isLoading: false }),
+        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '' }),
     }),
     {
       name: 'rembrandt-vault',

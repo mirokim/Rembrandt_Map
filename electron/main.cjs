@@ -193,6 +193,9 @@ function registerVaultIpcHandlers() {
     try {
       watcher = fs.watch(vaultPath, { recursive: true }, (_eventType, filename) => {
         if (!filename || !filename.endsWith('.md')) return
+        // Skip internal app config directory (.rembrant/) — written by the app itself
+        // (e.g. personas.md saved by usePersonaVaultSaver). These are not user vault edits.
+        if (filename.replace(/\\/g, '/').startsWith('.rembrant/')) return
         clearTimeout(watchDebounce)
         watchDebounce = setTimeout(() => {
           if (mainWindow && !mainWindow.isDestroyed()) {

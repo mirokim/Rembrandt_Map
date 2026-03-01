@@ -34,6 +34,7 @@ export function useVaultLoader() {
         return
       }
       setIsLoading(true)
+      setVaultReady(false)
       setLoadingProgress(0, '볼트 초기화 중...')
       setError(null)
       try {
