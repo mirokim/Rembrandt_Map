@@ -185,7 +185,7 @@ export default function Graph3D({ width, height }: Props) {
     sceneRef.current = scene
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 1, 2000)
-    camera.position.set(0, 0, 350)
+    camera.position.set(0, 0, 600)
     cameraRef.current = camera
 
     // OrbitControls
@@ -662,7 +662,7 @@ export default function Graph3D({ width, height }: Props) {
           ;(simRef.current as any)?.alphaTarget(0.3).restart()
         }
       }
-      setTooltip({ nodeId: draggingNodeIdRef.current, x: e.clientX, y: e.clientY })
+      setTooltip(null)  // clear tooltip as soon as drag begins
       return
     }
 
@@ -684,9 +684,7 @@ export default function Graph3D({ width, height }: Props) {
         if (newHoverId !== lastHoveredRef.current) {
           lastHoveredRef.current = newHoverId
           setHoveredNode(newHoverId)
-          setTooltip(newHoverId ? { nodeId: newHoverId, x: pos.x, y: pos.y } : null)
-        } else if (newHoverId) {
-          setTooltip({ nodeId: newHoverId, x: pos.x, y: pos.y })
+          // Tooltip only on click/mousedown — not on hover
         }
       })
     }

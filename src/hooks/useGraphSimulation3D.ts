@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useGraphStore } from '@/stores/graphStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { GraphNode } from '@/types'
 
 export interface SimNode3D extends GraphNode {
@@ -34,6 +35,10 @@ interface Options {
  */
 export function useGraphSimulation3D({ onTick }: Options) {
   const { nodes, links, physics } = useGraphStore()
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+  const isFastRef = useRef(isFast)
+  isFastRef.current = isFast
+
   const simRef = useRef<unknown>(null)
   const simNodesRef = useRef<SimNode3D[]>([])
   const simLinksRef = useRef<SimLink3D[]>([])
@@ -91,9 +96,17 @@ export function useGraphSimulation3D({ onTick }: Options) {
           }
         })
 
-      sim.on('tick', () => {
+      if (isFastRef.current) {
+        // Fast mode: run all ticks synchronously then stop — no ongoing animation loop
+        const tickCount = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()))
+        sim.tick(tickCount)
+        sim.stop()
         onTickRef.current(simNodesRef.current, simLinksRef.current)
-      })
+      } else {
+        sim.on('tick', () => {
+          onTickRef.current(simNodesRef.current, simLinksRef.current)
+        })
+      }
 
       simRef.current = sim
     })
@@ -109,16 +122,22 @@ export function useGraphSimulation3D({ onTick }: Options) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, links])
 
-  // Reheat when physics params change (without reinitializing nodes/links)
+  // Reheat when physics params or quality mode change
   useEffect(() => {
     gravityStrengthRef.current = physics.centerForce * 0.1
     const sim = simRef.current as any
     if (!sim) return
     sim.force('link')?.strength(physics.linkStrength).distance(physics.linkDistance)
     sim.force('charge')?.strength(physics.charge)
-    // 'center' is a closure that reads gravityStrengthRef.current — no re-registration needed
-    sim.alpha(0.3).restart()
-  }, [physics])
+    if (isFast) {
+      sim.stop()
+    } else {
+      // Re-attach tick handler in case it was missing (e.g. switched from fast mode)
+      sim.on('tick', () => onTickRef.current(simNodesRef.current, simLinksRef.current))
+      // 'center' is a closure that reads gravityStrengthRef.current — no re-registration needed
+      sim.alpha(0.3).restart()
+    }
+  }, [physics, isFast])
 
   return { simRef, simNodesRef, simLinksRef }
 }

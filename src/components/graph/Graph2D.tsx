@@ -197,6 +197,7 @@ export default function Graph2D({ width, height }: Props) {
   const handleSVGMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     // Node drag takes priority over background pan
     if (draggingNodeRef.current) {
+      setTooltip(null)  // clear tooltip as soon as drag begins
       const { x, y } = clientToGraph(e.clientX, e.clientY)
       const simNode = simNodesRef.current.find(n => n.id === draggingNodeRef.current)
       if (simNode) {
@@ -277,7 +278,7 @@ export default function Graph2D({ width, height }: Props) {
 
   // ── Node event handlers ───────────────────────────────────────────────────
 
-  // Start dragging: pin node at current mouse position, activate highlight
+  // Start dragging: pin node at current mouse position, activate highlight + show tooltip
   const handleNodeMouseDown = useCallback((nodeId: string, e: React.MouseEvent) => {
     e.stopPropagation()  // prevent SVG pan from starting
     draggingNodeRef.current = nodeId
@@ -305,9 +306,9 @@ export default function Graph2D({ width, height }: Props) {
     if (!docId.startsWith('_phantom_')) openInEditor(docId)
   }, [setSelectedNode, setSelectedDoc, openInEditor])
 
-  const handleMouseEnter = useCallback((nodeId: string, e: React.MouseEvent) => {
+  // Hover: highlight only — tooltip appears on mousedown/click, not hover
+  const handleMouseEnter = useCallback((nodeId: string) => {
     setHoveredNode(nodeId)
-    setTooltip({ nodeId, x: e.clientX, y: e.clientY })
   }, [setHoveredNode])
 
   const handleMouseLeave = useCallback(() => {
@@ -316,10 +317,6 @@ export default function Graph2D({ width, height }: Props) {
     setHoveredNode(null)
     setTooltip(null)
   }, [setHoveredNode])
-
-  const handleNodeMouseMove = useCallback((nodeId: string, e: React.MouseEvent) => {
-    setTooltip(t => t?.nodeId === nodeId ? { nodeId, x: e.clientX, y: e.clientY } : t)
-  }, [])
 
   // ── Neighbor highlight — O(k) delta updates via CSS class + data-hl attr ───
   useLayoutEffect(() => {
@@ -475,9 +472,8 @@ export default function Graph2D({ width, height }: Props) {
                   onClick={() => handleNodeClick(node.id)}
                   onDoubleClick={() => handleNodeDoubleClick(node.id, node.docId)}
                   onMouseDown={e => handleNodeMouseDown(node.id, e)}
-                  onMouseEnter={e => handleMouseEnter(node.id, e)}
+                  onMouseEnter={() => handleMouseEnter(node.id)}
                   onMouseLeave={handleMouseLeave}
-                  onMouseMove={e => handleNodeMouseMove(node.id, e)}
                   data-node-id={node.id}
                 />
               )

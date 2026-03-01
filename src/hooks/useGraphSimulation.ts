@@ -8,6 +8,7 @@ import {
 } from 'd3-force'
 import type { GraphNode, GraphLink } from '@/types'
 import { useGraphStore } from '@/stores/graphStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 export interface SimNode extends GraphNode {
   x: number
@@ -36,6 +37,10 @@ interface Options {
  */
 export function useGraphSimulation({ width, height, onTick }: Options) {
   const { nodes, links, physics } = useGraphStore()
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+  const isFastRef = useRef(isFast)
+  isFastRef.current = isFast
+
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null)
   const simNodesRef = useRef<SimNode[]>([])
   const simLinksRef = useRef<SimLink[]>([])
@@ -64,9 +69,17 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
       .force('charge', forceManyBody<SimNode>().strength(physics.charge))
       .force('center', forceCenter<SimNode>(width / 2, height / 2).strength(physics.centerForce))
 
-    sim.on('tick', () => {
+    if (isFastRef.current) {
+      // Fast mode: run all ticks synchronously then stop — no ongoing animation loop
+      const tickCount = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()))
+      sim.tick(tickCount)
+      sim.stop()
       onTickRef.current(simNodesRef.current, simLinksRef.current)
-    })
+    } else {
+      sim.on('tick', () => {
+        onTickRef.current(simNodesRef.current, simLinksRef.current)
+      })
+    }
 
     simRef.current = sim
     return () => {
@@ -77,7 +90,7 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height, nodes, links])
 
-  // Reheat when physics params change (without reinitializing nodes/links)
+  // Reheat when physics params or quality mode change
   useEffect(() => {
     const sim = simRef.current
     if (!sim) return
@@ -88,8 +101,14 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
       ?.strength(physics.charge)
     ;(sim.force('center') as ReturnType<typeof forceCenter<SimNode>> | null)
       ?.strength(physics.centerForce)
-    sim.alpha(0.3).restart()
-  }, [physics])
+    if (isFast) {
+      sim.stop()
+    } else {
+      // Re-attach tick handler in case it was missing (e.g. switched from fast mode)
+      sim.on('tick', () => onTickRef.current(simNodesRef.current, simLinksRef.current))
+      sim.alpha(0.3).restart()
+    }
+  }, [physics, isFast])
 
   return { simRef, simNodesRef, simLinksRef }
 }

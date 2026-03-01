@@ -84,9 +84,11 @@ function ParagraphBlock({ section, speaker }: Props) {
     )
   }, [processedBody, paragraphRenderQuality])
 
+  const isFast = paragraphRenderQuality === 'fast'
+
   return (
     <div
-      className="mb-6 pl-3 transition-all"
+      className="mb-6 pl-3"
       style={{
         borderLeft: hovered
           ? `2px solid ${speakerColor}`
@@ -94,7 +96,7 @@ function ParagraphBlock({ section, speaker }: Props) {
         background: hovered
           ? `${speakerColor}0d` // ~5% opacity tint
           : 'transparent',
-        transition: 'background 0.15s, border-color 0.15s',
+        transition: isFast ? undefined : 'background 0.15s, border-color 0.15s',
         borderRadius: '0 4px 4px 0',
         padding: '4px 0 4px 12px',
       }}

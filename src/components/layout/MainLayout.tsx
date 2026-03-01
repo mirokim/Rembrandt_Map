@@ -10,6 +10,7 @@ import ConverterEditor from '@/components/converter/ConverterEditor'
 import MarkdownEditor from '@/components/editor/MarkdownEditor'
 import PhysicsControls from '@/components/graph/PhysicsControls'
 import { useUIStore } from '@/stores/uiStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const LEFT_MIN = 140
 const LEFT_MAX = 340
@@ -20,18 +21,26 @@ const PANEL_SPRING = { type: 'spring', stiffness: 80, damping: 18, delay: 0.15 }
 const OVERLAY_TRANSITION = { duration: 0.2 }
 const COLLAPSE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 } as const
 
-// Shared glass panel style
-const glassPanelStyle = {
-  background: 'var(--color-bg-overlay)',
-  backdropFilter: 'blur(14px)',
-  WebkitBackdropFilter: 'blur(14px)',
-  borderRadius: 10,
-  overflow: 'hidden' as const,
-  border: '1px solid rgba(255,255,255,0.04)',
-}
-
 export default function MainLayout() {
   const { centerTab, editingDocId, leftPanelCollapsed, rightPanelCollapsed } = useUIStore()
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+
+  // In fast mode: solid background (no blur compositing). Normal mode: frosted glass.
+  const glassPanelStyle = isFast
+    ? {
+        background: 'var(--color-bg-secondary)',
+        borderRadius: 10,
+        overflow: 'hidden' as const,
+        border: '1px solid var(--color-border)',
+      }
+    : {
+        background: 'var(--color-bg-overlay)',
+        backdropFilter: 'blur(14px)',
+        WebkitBackdropFilter: 'blur(14px)',
+        borderRadius: 10,
+        overflow: 'hidden' as const,
+        border: '1px solid rgba(255,255,255,0.04)',
+      }
   const [leftWidth, setLeftWidth] = useState(186)
   const [rightWidth, setRightWidth] = useState(360)
 
@@ -45,6 +54,7 @@ export default function MainLayout() {
 
   return (
     <div
+      data-perf={isFast ? 'fast' : undefined}
       style={{
         height: '100vh',
         background: 'var(--color-bg-primary)',
@@ -124,8 +134,8 @@ export default function MainLayout() {
               margin: '8px 0 12px 0',
             }}
           >
-            {/* Physics controls — rendered here (above side panels in z-order) */}
-            {centerTab !== 'editor' && (
+            {/* Physics controls — hidden in fast mode (physics is disabled) */}
+            {centerTab !== 'editor' && !isFast && (
               <div
                 style={{
                   position: 'absolute',
