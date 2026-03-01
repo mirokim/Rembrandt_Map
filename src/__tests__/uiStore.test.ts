@@ -10,6 +10,7 @@ beforeEach(() => {
     theme: 'dark',
     graphMode: '3d',
     panelOpacity: 1,
+    showNodeLabels: false,
   })
 })
 
@@ -121,5 +122,29 @@ describe('useUIStore — panelOpacity', () => {
     expect(useUIStore.getState().panelOpacity).toBe(0.3)
     useUIStore.getState().setPanelOpacity(0.97)
     expect(useUIStore.getState().panelOpacity).toBe(0.97)
+  })
+})
+
+describe('useUIStore — showNodeLabels / toggleNodeLabels', () => {
+  it('defaults to false', () => {
+    expect(useUIStore.getState().showNodeLabels).toBe(false)
+  })
+
+  it('toggleNodeLabels flips to true', () => {
+    useUIStore.getState().toggleNodeLabels()
+    expect(useUIStore.getState().showNodeLabels).toBe(true)
+  })
+
+  it('toggleNodeLabels flips back to false', () => {
+    useUIStore.getState().toggleNodeLabels()
+    useUIStore.getState().toggleNodeLabels()
+    expect(useUIStore.getState().showNodeLabels).toBe(false)
+  })
+
+  it('toggling does not affect other UI state', () => {
+    useUIStore.getState().setCenterTab('document')
+    useUIStore.getState().toggleNodeLabels()
+    expect(useUIStore.getState().centerTab).toBe('document')
+    expect(useUIStore.getState().appState).toBe('launch')
   })
 })

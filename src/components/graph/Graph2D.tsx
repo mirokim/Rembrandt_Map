@@ -16,8 +16,8 @@ interface Props {
 const LABEL_Y_OFFSET = 16  // px below node center
 
 export default function Graph2D({ width, height }: Props) {
-  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, physics } = useGraphStore()
-  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, aiHighlightNodeIds, setSelectedNode, setHoveredNode, physics } = useGraphStore()
+  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor, showNodeLabels } = useUIStore()
   const colorRules = useSettingsStore(s => s.colorRules)
   const tagColors = useSettingsStore(s => s.tagColors)
   const folderColors = useSettingsStore(s => s.folderColors)
@@ -226,11 +226,41 @@ export default function Graph2D({ width, height }: Props) {
     if (svgRef.current) svgRef.current.style.cursor = 'grab'
   }, [simNodesRef, simRef])
 
-  // ── Hide labels when an overlay panel is active ───────────────────────────
+  // ── Hide label group only when overlay panel is active (opacity controls per-label) ──
   useEffect(() => {
     if (!labelGroupRef.current) return
     labelGroupRef.current.style.display = centerTab === 'graph' ? '' : 'none'
   }, [centerTab])
+
+  // ── Inject @keyframes once on mount (avoid re-injection on every render) ───
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `
+      @keyframes aiScan {
+        0%, 100% { filter: drop-shadow(0 0 3px #34d399); }
+        50%       { filter: drop-shadow(0 0 12px #34d399) drop-shadow(0 0 5px #34d399); }
+      }
+    `
+    document.head.appendChild(style)
+    return () => { style.remove() }
+  }, [])
+
+  // ── AI highlight: pulse CSS animation on scanned nodes ────────────────────
+  useLayoutEffect(() => {
+    const nodeMap = nodeEls.current
+    if (aiHighlightNodeIds.length === 0) {
+      nodeMap.forEach(el => { el.style.animation = '' })
+      return
+    }
+    const highlightSet = new Set(aiHighlightNodeIds)
+    nodes.forEach(n => {
+      const el = nodeMap.get(n.id)
+      if (!el) return
+      el.style.animation = highlightSet.has(n.id)
+        ? 'aiScan 1.2s ease-in-out infinite'
+        : ''
+    })
+  }, [aiHighlightNodeIds, nodes])
 
   // ── Node event handlers ───────────────────────────────────────────────────
 
@@ -285,12 +315,12 @@ export default function Graph2D({ width, height }: Props) {
     const linkMap = linkEls.current
 
     if (!hoveredNodeId) {
-      // Reset all visual overrides
+      // Reset nodes and links; label opacity depends on showNodeLabels toggle
       nodes.forEach(n => {
         const el = nodeMap.get(n.id)
         if (el) { el.style.opacity = ''; el.style.filter = '' }
         const lEl = labelMap.get(n.id)
-        if (lEl) lEl.style.opacity = ''
+        if (lEl) lEl.style.opacity = showNodeLabels ? '' : '0'
       })
       links.forEach((_: GraphLink, i: number) => {
         const el = linkMap.get(i)
@@ -328,7 +358,7 @@ export default function Graph2D({ width, height }: Props) {
         if (lEl) lEl.style.opacity = '1'
       } else {
         if (el) { el.style.opacity = '0.12'; el.style.filter = '' }
-        if (lEl) lEl.style.opacity = '0.08'
+        if (lEl) lEl.style.opacity = '0'
       }
     })
 
@@ -346,7 +376,7 @@ export default function Graph2D({ width, height }: Props) {
         el.style.strokeWidth = ''
       }
     })
-  }, [hoveredNodeId, nodes, links])
+  }, [hoveredNodeId, nodes, links, showNodeLabels])
 
   return (
     <div style={{ position: 'relative', width, height }} data-testid="graph-2d">
@@ -447,7 +477,7 @@ export default function Graph2D({ width, height }: Props) {
                 strokeWidth={3}
                 strokeLinejoin="round"
                 paintOrder="stroke"
-                opacity={0.95}
+                opacity={showNodeLabels ? 0.95 : 0}
                 pointerEvents="none"
                 style={{ userSelect: 'none' }}
                 data-testid={`node-label-${node.id}`}

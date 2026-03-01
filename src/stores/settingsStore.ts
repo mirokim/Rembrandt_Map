@@ -8,6 +8,7 @@ import type { VaultPersonaConfig } from '@/lib/personaVaultConfig'
 // ── State interface ────────────────────────────────────────────────────────────
 
 export type AppTheme = 'light' | 'dark' | 'oled'
+export type ParagraphRenderQuality = 'high' | 'medium' | 'fast'
 
 export interface ProjectInfo {
   name: string
@@ -68,6 +69,8 @@ interface SettingsState {
   disabledPersonaIds: string[]
   /** Whether markdown editor opens in locked (read-only) mode by default */
   editorDefaultLocked: boolean
+  /** Paragraph rendering quality: high = full markdown+wikilinks, medium = markdown only, fast = plain text */
+  paragraphRenderQuality: ParagraphRenderQuality
   /** Allowed tag names for AI tag suggestion */
   tagPresets: string[]
   /** User-assigned hex colors per tag name (overrides auto-palette in graph) */
@@ -97,6 +100,7 @@ interface SettingsState {
   /** Reset all persona state to defaults (called when loading a vault with no config) */
   resetVaultPersonas: () => void
   setEditorDefaultLocked: (locked: boolean) => void
+  setParagraphRenderQuality: (q: ParagraphRenderQuality) => void
   addTagPreset: (tag: string) => void
   removeTagPreset: (tag: string) => void
   setTagColor: (tag: string, color: string) => void
@@ -144,6 +148,7 @@ export const useSettingsStore = create<SettingsState>()(
       personaPromptOverrides: {},
       disabledPersonaIds: [],
       editorDefaultLocked: false,
+      paragraphRenderQuality: 'fast' as ParagraphRenderQuality,
       tagPresets: [],
       tagColors: {},
       folderColors: {},
@@ -238,6 +243,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       setEditorDefaultLocked: (editorDefaultLocked) => set({ editorDefaultLocked }),
 
+      setParagraphRenderQuality: (paragraphRenderQuality) => set({ paragraphRenderQuality }),
+
       addTagPreset: (tag) =>
         set((s) => ({
           tagPresets: s.tagPresets.includes(tag) ? s.tagPresets : [...s.tagPresets, tag],
@@ -268,6 +275,7 @@ export const useSettingsStore = create<SettingsState>()(
         personaPromptOverrides: state.personaPromptOverrides,
         disabledPersonaIds: state.disabledPersonaIds,
         editorDefaultLocked: state.editorDefaultLocked,
+        paragraphRenderQuality: state.paragraphRenderQuality,
         tagPresets: state.tagPresets,
         tagColors: state.tagColors,
         folderColors: state.folderColors,

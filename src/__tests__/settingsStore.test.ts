@@ -111,3 +111,34 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settingsPanelOpen).toBe(false)
   })
 })
+
+describe('settingsStore — paragraphRenderQuality', () => {
+  it('defaults to "fast"', () => {
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('fast')
+  })
+
+  it('setParagraphRenderQuality changes to "high"', () => {
+    useSettingsStore.getState().setParagraphRenderQuality('high')
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('high')
+  })
+
+  it('setParagraphRenderQuality changes to "medium"', () => {
+    useSettingsStore.getState().setParagraphRenderQuality('medium')
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('medium')
+  })
+
+  it('cycles through all three quality levels', () => {
+    const { setParagraphRenderQuality } = useSettingsStore.getState()
+    setParagraphRenderQuality('high')
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('high')
+    setParagraphRenderQuality('medium')
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('medium')
+    setParagraphRenderQuality('fast')
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('fast')
+  })
+
+  it('does not affect other settings state', () => {
+    useSettingsStore.getState().setParagraphRenderQuality('high')
+    expect(useSettingsStore.getState().settingsPanelOpen).toBe(false)
+  })
+})

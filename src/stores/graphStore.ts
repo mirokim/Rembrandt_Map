@@ -33,9 +33,12 @@ interface GraphState {
   selectedNodeId: string | null
   hoveredNodeId: string | null
   physics: PhysicsParams
+  /** Node IDs to highlight while AI is scanning/analyzing */
+  aiHighlightNodeIds: string[]
 
   setSelectedNode: (id: string | null) => void
   setHoveredNode: (id: string | null) => void
+  setAiHighlightNodes: (ids: string[]) => void
   updatePhysics: (params: Partial<PhysicsParams>) => void
   resetPhysics: () => void
   /** Phase 6: replace nodes/links with vault-derived data */
@@ -51,9 +54,11 @@ export const useGraphStore = create<GraphState>()((set) => ({
   selectedNodeId: null,
   hoveredNodeId: null,
   physics: { ...DEFAULT_PHYSICS },
+  aiHighlightNodeIds: [],
 
   setSelectedNode: (selectedNodeId) => set({ selectedNodeId }),
   setHoveredNode: (hoveredNodeId) => set({ hoveredNodeId }),
+  setAiHighlightNodes: (aiHighlightNodeIds) => set({ aiHighlightNodeIds }),
   updatePhysics: (params) =>
     set((state) => ({
       physics: { ...state.physics, ...clampPhysics(params) },

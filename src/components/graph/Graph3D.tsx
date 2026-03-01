@@ -49,6 +49,12 @@ export default function Graph3D({ width, height }: Props) {
   const particleOffsets = useRef<Float32Array | null>(null)
   const tickRef = useRef(0)
   const raycasterRef = useRef(new THREE.Raycaster())
+  // AI highlight: set of node IDs currently being scanned (updated via effect)
+  const aiHighlightRef = useRef<Set<string>>(new Set())
+  // Previous AI highlight set — used for delta-only scale updates in animation loop
+  const prevAiHighlightRef = useRef<Set<string>>(new Set())
+  // Individual label divs for per-node visibility control (hover-based labels)
+  const labelDivsRef = useRef<Map<string, HTMLElement>>(new Map())
 
   // Drag state
   const draggingNodeIdRef = useRef<string | null>(null)
@@ -59,8 +65,8 @@ export default function Graph3D({ width, height }: Props) {
   // Adjacency map: nodeId → Set<linkIndex>
   const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
 
-  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks, physics } = useGraphStore()
-  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks, physics, aiHighlightNodeIds } = useGraphStore()
+  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor, showNodeLabels } = useUIStore()
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
   const colorRules = useSettingsStore(s => s.colorRules)
   const tagColors = useSettingsStore(s => s.tagColors)
@@ -212,12 +218,13 @@ export default function Graph3D({ width, height }: Props) {
       labelDiv.style.pointerEvents = 'none'
       labelDiv.style.whiteSpace = 'nowrap'
       labelDiv.style.textShadow = '0 0 6px #000, 0 0 4px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000'
-      labelDiv.style.opacity = '0.95'
+      labelDiv.style.opacity = useUIStore.getState().showNodeLabels ? '0.95' : '0'
       labelDiv.style.userSelect = 'none'
       labelDiv.style.letterSpacing = '0.01em'
       const labelObj = new CSS2DObject(labelDiv)
       labelObj.position.set(0, -NODE_RADIUS - 6, 0)
       mesh.add(labelObj)
+      labelDivsRef.current.set(node.id, labelDiv)
     })
 
     // ── Edges with vertex colors for per-edge highlight ─────────────────────
@@ -301,6 +308,21 @@ export default function Graph3D({ width, height }: Props) {
         selRingRef.current.rotation.z += 0.008
       }
 
+      // AI highlight: pulse scale — delta-only updates (O(k) not O(n))
+      const aiSet = aiHighlightRef.current
+      const prevAiSet = prevAiHighlightRef.current
+      if (aiSet.size > 0) {
+        const pulseFactor = 1 + Math.sin(tickRef.current * 0.06) * 0.3
+        aiSet.forEach(nodeId => {
+          nodeMeshesRef.current.get(nodeId)?.scale.setScalar(pulseFactor)
+        })
+        // Reset nodes that left the highlight set
+        prevAiSet.forEach(nodeId => {
+          if (!aiSet.has(nodeId)) nodeMeshesRef.current.get(nodeId)?.scale.setScalar(1)
+        })
+      }
+      prevAiHighlightRef.current = aiSet
+
       if (particlesRef.current?.visible && particlePosRef.current && particleOffsets.current) {
         const t = tickRef.current * 0.01
         for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -333,6 +355,7 @@ export default function Graph3D({ width, height }: Props) {
       ringGeo.dispose()
       pGeo.dispose()
       nodeMeshesRef.current.clear()
+      labelDivsRef.current.clear()
       linePosRef.current = null
       lineColorArrayRef.current = null
       lineColorAttrRef.current = null
@@ -394,12 +417,34 @@ export default function Graph3D({ width, height }: Props) {
     }
   }, [physics.linkOpacity])
 
-  // ── CSS2DRenderer labels: hide when overlay panel is active ──────────────
+  // ── CSS2DRenderer labels: hide only when overlay panel is active ────────────
   useEffect(() => {
     const css2d = css2dRendererRef.current
     if (!css2d) return
     css2d.domElement.style.display = centerTab === 'graph' ? '' : 'none'
   }, [centerTab])
+
+  // ── Per-node label visibility: hidden by default, shown on hover ─────────
+  useEffect(() => {
+    const divMap = labelDivsRef.current
+    if (divMap.size === 0) return
+    divMap.forEach((div, nodeId) => {
+      if (showNodeLabels) {
+        div.style.opacity = ''  // show all (CSS2D default)
+      } else {
+        div.style.opacity = nodeId === hoveredNodeId ? '1' : '0'
+      }
+    })
+  }, [showNodeLabels, hoveredNodeId])
+
+  // ── AI highlight: sync aiHighlightNodeIds → ref for use in animation loop ──
+  useEffect(() => {
+    aiHighlightRef.current = new Set(aiHighlightNodeIds)
+    if (aiHighlightNodeIds.length === 0) {
+      // Reset all node scales immediately when highlights are cleared
+      nodeMeshesRef.current.forEach(mesh => mesh.scale.setScalar(1))
+    }
+  }, [aiHighlightNodeIds])
 
   // ── Neighbor highlight when hoveredNodeId changes ─────────────────────────
   useEffect(() => {

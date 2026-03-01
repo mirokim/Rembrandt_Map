@@ -739,6 +739,45 @@ function buildStructureHeader(
   return lines.join('\n') + '\n'
 }
 
+// ── 3a-extra. BFS node ID helpers (for graph highlight) ──────────────────────
+
+/** Shared setup: read stores + build adjacency. Returns null when no data. */
+function getAdjacency(): Map<string, string[]> | null {
+  const { links } = useGraphStore.getState()
+  const { loadedDocuments } = useVaultStore.getState()
+  if (!loadedDocuments?.length || !links.length) return null
+  return getCachedMaps(links, loadedDocuments).adjacency
+}
+
+/**
+ * Returns the doc IDs visited by BFS from a given starting document.
+ * Used to highlight nodes in the graph while AI is analyzing.
+ */
+export function getBfsContextDocIds(
+  startDocId: string,
+  maxHops: number = 3,
+  maxDocs: number = 20
+): string[] {
+  const adjacency = getAdjacency()
+  if (!adjacency) return [startDocId]
+  return [...bfsFromDocIds([startDocId], adjacency, maxHops, maxDocs).keys()]
+}
+
+/**
+ * Returns the doc IDs visited by the hub-seeded global BFS traversal.
+ * Used to highlight nodes in the graph during a full-project AI analysis.
+ */
+export function getGlobalContextDocIds(
+  maxDocs: number = 35,
+  maxHops: number = 4
+): string[] {
+  const adjacency = getAdjacency()
+  if (!adjacency) return []
+  const hubIds = getHubDocIds(adjacency, 8)
+  if (hubIds.length === 0) return []
+  return [...bfsFromDocIds(hubIds, adjacency, maxHops, maxDocs).keys()]
+}
+
 // ── 3b. Hub-seeded global graph context ──────────────────────────────────────
 
 /**

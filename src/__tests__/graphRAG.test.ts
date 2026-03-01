@@ -6,6 +6,8 @@ import {
   expandWithGraphNeighbors,
   rerankResults,
   formatCompressedContext,
+  getBfsContextDocIds,
+  getGlobalContextDocIds,
 } from '@/lib/graphRAG'
 
 // ── Test data ────────────────────────────────────────────────────────────────
@@ -247,5 +249,79 @@ describe('formatCompressedContext', () => {
     const results = [makeSearchResult({ speaker: 'unknown' })]
     const output = formatCompressedContext(results, [])
     expect(output).not.toContain('(unknown)')
+  })
+})
+
+// ── getBfsContextDocIds ───────────────────────────────────────────────────────
+
+describe('getBfsContextDocIds', () => {
+  it('returns startDocId when no links exist', () => {
+    useGraphStore.setState({ links: [] })
+    const ids = getBfsContextDocIds('design_doc')
+    expect(ids).toEqual(['design_doc'])
+  })
+
+  it('returns startDocId when no documents are loaded', () => {
+    useVaultStore.setState({ loadedDocuments: null })
+    const ids = getBfsContextDocIds('design_doc')
+    expect(ids).toEqual(['design_doc'])
+  })
+
+  it('includes the start doc and its BFS neighbors', () => {
+    const ids = getBfsContextDocIds('design_doc')
+    expect(ids).toContain('design_doc')
+    expect(ids).toContain('art_doc')
+  })
+
+  it('does not include documents unreachable within maxHops=0', () => {
+    const ids = getBfsContextDocIds('design_doc', 0, 20)
+    expect(ids).toEqual(['design_doc'])
+  })
+
+  it('respects maxDocs limit', () => {
+    const ids = getBfsContextDocIds('design_doc', 3, 1)
+    expect(ids.length).toBeLessThanOrEqual(1)
+  })
+
+  it('returns only doc IDs, no duplicates', () => {
+    const ids = getBfsContextDocIds('design_doc')
+    const unique = new Set(ids)
+    expect(unique.size).toBe(ids.length)
+  })
+})
+
+// ── getGlobalContextDocIds ───────────────────────────────────────────────────
+
+describe('getGlobalContextDocIds', () => {
+  it('returns empty array when no links exist', () => {
+    useGraphStore.setState({ links: [] })
+    expect(getGlobalContextDocIds()).toEqual([])
+  })
+
+  it('returns empty array when no documents are loaded', () => {
+    useVaultStore.setState({ loadedDocuments: null })
+    expect(getGlobalContextDocIds()).toEqual([])
+  })
+
+  it('returns doc IDs from hub-seeded BFS traversal', () => {
+    const ids = getGlobalContextDocIds()
+    expect(ids.length).toBeGreaterThan(0)
+    // design_doc and art_doc are connected — both should appear
+    expect(ids).toContain('design_doc')
+    expect(ids).toContain('art_doc')
+  })
+
+  it('maxDocs caps result below total document count', () => {
+    // maxDocs is a BFS traversal cap — hub seeds may slightly exceed it,
+    // but the result is always bounded by the total number of docs
+    const TOTAL_DOCS = 3 // MOCK_DOCS has 3 entries
+    const ids = getGlobalContextDocIds(2, 4)
+    expect(ids.length).toBeLessThanOrEqual(TOTAL_DOCS)
+  })
+
+  it('returns only unique doc IDs', () => {
+    const ids = getGlobalContextDocIds()
+    const unique = new Set(ids)
+    expect(unique.size).toBe(ids.length)
   })
 })

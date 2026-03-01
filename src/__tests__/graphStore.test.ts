@@ -8,6 +8,7 @@ beforeEach(() => {
     links: MOCK_LINKS,
     selectedNodeId: null,
     hoveredNodeId: null,
+    aiHighlightNodeIds: [],
     physics: { ...DEFAULT_PHYSICS },
   })
 })
@@ -106,5 +107,36 @@ describe('useGraphStore — resetPhysics()', () => {
     useGraphStore.getState().updatePhysics({ centerForce: 0.9, charge: -100, linkDistance: 200 })
     useGraphStore.getState().resetPhysics()
     expect(useGraphStore.getState().physics).toEqual(DEFAULT_PHYSICS)
+  })
+})
+
+describe('useGraphStore — setAiHighlightNodes()', () => {
+  it('defaults to empty array', () => {
+    expect(useGraphStore.getState().aiHighlightNodeIds).toEqual([])
+  })
+
+  it('sets a list of node IDs', () => {
+    useGraphStore.getState().setAiHighlightNodes(['node_a', 'node_b'])
+    expect(useGraphStore.getState().aiHighlightNodeIds).toEqual(['node_a', 'node_b'])
+  })
+
+  it('clears to empty array', () => {
+    useGraphStore.getState().setAiHighlightNodes(['node_a'])
+    useGraphStore.getState().setAiHighlightNodes([])
+    expect(useGraphStore.getState().aiHighlightNodeIds).toEqual([])
+  })
+
+  it('replaces previous list entirely', () => {
+    useGraphStore.getState().setAiHighlightNodes(['node_a', 'node_b'])
+    useGraphStore.getState().setAiHighlightNodes(['node_c'])
+    expect(useGraphStore.getState().aiHighlightNodeIds).toEqual(['node_c'])
+  })
+
+  it('does not affect other store fields', () => {
+    const firstNodeId = MOCK_NODES[0].id
+    useGraphStore.getState().setSelectedNode(firstNodeId)
+    useGraphStore.getState().setAiHighlightNodes(['node_x'])
+    expect(useGraphStore.getState().selectedNodeId).toBe(firstNodeId)
+    expect(useGraphStore.getState().hoveredNodeId).toBeNull()
   })
 })

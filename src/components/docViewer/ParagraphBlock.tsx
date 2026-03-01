@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { DocSection, SpeakerId } from '@/types'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
+import { useSettingsStore } from '@/stores/settingsStore'
 import WikiLink from './WikiLink'
 
 interface Props {
@@ -22,14 +23,66 @@ function preprocessWikiLinks(text: string): string {
   })
 }
 
-export default function ParagraphBlock({ section, speaker }: Props) {
+/** Strip wiki-link syntax to plain display text for fast mode */
+function stripWikiLinks(text: string): string {
+  return text.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
+    const parts = inner.split('|')
+    return parts.length > 1 ? parts[1].trim() : parts[0].split('#')[0].trim()
+  })
+}
+
+function ParagraphBlock({ section, speaker }: Props) {
   const [hovered, setHovered] = useState(false)
   const speakerColor = SPEAKER_CONFIG[speaker].color
+  const paragraphRenderQuality = useSettingsStore(s => s.paragraphRenderQuality)
 
-  const markdownBody = useMemo(
-    () => preprocessWikiLinks(section.body),
-    [section.body]
-  )
+  const processedBody = useMemo(() => {
+    if (paragraphRenderQuality === 'high') return preprocessWikiLinks(section.body)
+    if (paragraphRenderQuality === 'fast') return stripWikiLinks(section.body)
+    return section.body // medium: raw body, ReactMarkdown handles standard markdown
+  }, [section.body, paragraphRenderQuality])
+
+  const bodyContent = useMemo(() => {
+    if (paragraphRenderQuality === 'fast') {
+      return (
+        <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+          {processedBody}
+        </p>
+      )
+    }
+
+    if (paragraphRenderQuality === 'medium') {
+      return (
+        <ReactMarkdown urlTransform={(url) => url}>
+          {processedBody}
+        </ReactMarkdown>
+      )
+    }
+
+    // high: full markdown + interactive wiki-links
+    return (
+      <ReactMarkdown
+        urlTransform={(url) => url}
+        components={{
+          a({ href, children }) {
+            if (href?.startsWith('#wikilink-')) {
+              const slug = decodeURIComponent(href.slice('#wikilink-'.length))
+              return <WikiLink slug={slug} />
+            }
+            return (
+              <a href={href} target="_blank" rel="noopener noreferrer"
+                style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
+              >
+                {children}
+              </a>
+            )
+          },
+        }}
+      >
+        {processedBody}
+      </ReactMarkdown>
+    )
+  }, [processedBody, paragraphRenderQuality])
 
   return (
     <div
@@ -60,27 +113,10 @@ export default function ParagraphBlock({ section, speaker }: Props) {
         className="text-sm leading-relaxed prose-vault"
         style={{ color: 'var(--color-text-secondary)' }}
       >
-        <ReactMarkdown
-          urlTransform={(url) => url}
-          components={{
-            a({ href, children }) {
-              if (href?.startsWith('#wikilink-')) {
-                const slug = decodeURIComponent(href.slice('#wikilink-'.length))
-                return <WikiLink slug={slug} />
-              }
-              return (
-                <a href={href} target="_blank" rel="noopener noreferrer"
-                  style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
-                >
-                  {children}
-                </a>
-              )
-            },
-          }}
-        >
-          {markdownBody}
-        </ReactMarkdown>
+        {bodyContent}
       </div>
     </div>
   )
 }
+
+export default memo(ParagraphBlock)

@@ -1,15 +1,21 @@
-import { Globe, Sun, Moon, Monitor } from 'lucide-react'
-import { useSettingsStore, type AppTheme } from '@/stores/settingsStore'
+import { Globe, Sun, Moon, Monitor, Zap } from 'lucide-react'
+import { useSettingsStore, type AppTheme, type ParagraphRenderQuality } from '@/stores/settingsStore'
 import VaultSelector from '../VaultSelector'
 
-export default function GeneralTab() {
-  const { theme, setTheme, editorDefaultLocked, setEditorDefaultLocked } = useSettingsStore()
+const THEMES: { id: AppTheme; label: string; Icon: React.ElementType }[] = [
+  { id: 'light', label: '라이트',    Icon: Sun     },
+  { id: 'dark',  label: '다크',      Icon: Moon    },
+  { id: 'oled',  label: 'OLED 블랙', Icon: Monitor },
+]
 
-  const themes: { id: AppTheme; label: string; Icon: React.ElementType }[] = [
-    { id: 'light', label: '라이트',    Icon: Sun     },
-    { id: 'dark',  label: '다크',      Icon: Moon    },
-    { id: 'oled',  label: 'OLED 블랙', Icon: Monitor },
-  ]
+const PARAGRAPH_QUALITIES: { id: ParagraphRenderQuality; label: string; desc: string }[] = [
+  { id: 'high',   label: '고품질', desc: '마크다운 + 위키링크' },
+  { id: 'medium', label: '보통',   desc: '마크다운만' },
+  { id: 'fast',   label: '빠름',   desc: '일반 텍스트' },
+]
+
+export default function GeneralTab() {
+  const { theme, setTheme, editorDefaultLocked, setEditorDefaultLocked, paragraphRenderQuality, setParagraphRenderQuality } = useSettingsStore()
 
   return (
     <div className="flex flex-col gap-7">
@@ -45,7 +51,7 @@ export default function GeneralTab() {
       <section>
         <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>테마</h3>
         <div className="grid grid-cols-3 gap-2">
-          {themes.map(({ id, label, Icon }) => {
+          {THEMES.map(({ id, label, Icon }) => {
             const active = theme === id
             return (
               <button
@@ -91,6 +97,34 @@ export default function GeneralTab() {
               style={{ transform: editorDefaultLocked ? 'translateX(18px)' : 'translateX(2px)' }}
             />
           </button>
+        </div>
+      </section>
+
+      {/* 문서 뷰어 렌더링 */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-3">
+          <Zap size={13} style={{ color: 'var(--color-text-muted)' }} />
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>문서 렌더링 품질</h3>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {PARAGRAPH_QUALITIES.map(({ id, label, desc }) => {
+            const active = paragraphRenderQuality === id
+            return (
+              <button
+                key={id}
+                onClick={() => setParagraphRenderQuality(id)}
+                className="flex flex-col items-center gap-1.5 py-3 rounded-lg transition-colors"
+                style={{
+                  border: `1.5px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                  background: active ? 'rgba(59,130,246,0.08)' : 'transparent',
+                  color: active ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                }}
+              >
+                <span className="text-xs font-semibold">{label}</span>
+                <span className="text-[10px] opacity-70">{desc}</span>
+              </button>
+            )
+          })}
         </div>
       </section>
 

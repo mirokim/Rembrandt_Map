@@ -3,11 +3,16 @@ import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { Palette, Sparkles, X, Loader2 } from 'lucide-react'
+import { Palette, Sparkles, X, Loader2, Eye, EyeOff } from 'lucide-react'
 import Graph2D from './Graph2D'
 import Graph3D from './Graph3D'
 import type { NodeColorMode } from '@/types'
-import { buildDeepGraphContextFromDocId, buildGlobalGraphContext } from '@/lib/graphRAG'
+import {
+  buildDeepGraphContextFromDocId,
+  buildGlobalGraphContext,
+  getBfsContextDocIds,
+  getGlobalContextDocIds,
+} from '@/lib/graphRAG'
 import { streamMessage } from '@/services/llmClient'
 
 const COLOR_MODES: { mode: NodeColorMode; label: string }[] = [
@@ -40,8 +45,8 @@ interface AnalysisState {
 }
 
 export default function GraphPanel() {
-  const { graphMode, nodeColorMode, setNodeColorMode } = useUIStore()
-  const { selectedNodeId } = useGraphStore()
+  const { graphMode, nodeColorMode, setNodeColorMode, showNodeLabels, toggleNodeLabels } = useUIStore()
+  const { selectedNodeId, setAiHighlightNodes } = useGraphStore()
   const { loadedDocuments } = useVaultStore()
   const { personaModels } = useSettingsStore()
 
@@ -65,8 +70,9 @@ export default function GraphPanel() {
   }, [])
 
   const handleAnalyze = useCallback(async () => {
-    // 진행 중인 분석 중단
+    // 진행 중인 분석 중단 + 이전 하이라이트 클리어
     abortRef.current?.()
+    setAiHighlightNodes([])
 
     // 노드 선택 O: 해당 노드 중심 BFS / 노드 선택 X: 허브 기반 전체 탐색
     let context: string
@@ -76,12 +82,15 @@ export default function GraphPanel() {
       const doc = loadedDocuments?.find(d => d.id === selectedNodeId)
       nodeName = doc?.filename.replace(/\.md$/i, '') ?? selectedNodeId
       context = buildDeepGraphContextFromDocId(selectedNodeId)
+      setAiHighlightNodes(getBfsContextDocIds(selectedNodeId))
     } else {
       nodeName = '전체 프로젝트'
       context = buildGlobalGraphContext(35, 4)
+      setAiHighlightNodes(getGlobalContextDocIds(35, 4))
     }
 
     if (!context) {
+      setAiHighlightNodes([])
       setAnalysis({ nodeName, content: '볼트가 로드되었는지 확인하세요. 문서가 없거나 연결이 없습니다.', loading: false })
       return
     }
@@ -120,19 +129,22 @@ export default function GraphPanel() {
     } catch {
       if (!aborted) {
         setAnalysis(prev => prev ? { ...prev, content: prev.content + '\n\n[오류가 발생했습니다]', loading: false, phase: undefined } : null)
+        setAiHighlightNodes([])
         return
       }
     }
 
     if (!aborted) {
       setAnalysis(prev => prev ? { ...prev, loading: false, phase: undefined } : null)
+      setAiHighlightNodes([])
     }
-  }, [selectedNodeId, loadedDocuments, personaModels])
+  }, [selectedNodeId, loadedDocuments, personaModels, setAiHighlightNodes])
 
   const closeAnalysis = useCallback(() => {
     abortRef.current?.()
+    setAiHighlightNodes([])
     setAnalysis(null)
-  }, [])
+  }, [setAiHighlightNodes])
 
   // 선택 노드가 바뀌면 이전 분석 닫기
   useEffect(() => {
@@ -212,6 +224,19 @@ export default function GraphPanel() {
             </div>
           )}
         </div>
+
+        {/* 노드 라벨 토글 버튼 */}
+        <button
+          onClick={toggleNodeLabels}
+          style={{
+            ...floatBtnStyle,
+            color: showNodeLabels ? 'var(--color-accent)' : 'var(--color-text-muted)',
+          }}
+          title={showNodeLabels ? '라벨 숨기기' : '라벨 표시'}
+          aria-label="Node label visibility"
+        >
+          {showNodeLabels ? <Eye size={12} /> : <EyeOff size={12} />}
+        </button>
 
         {/* AI 분석 버튼 — 항상 표시 (노드 선택 O: 노드 중심 / X: 전체 프로젝트) */}
         <button
