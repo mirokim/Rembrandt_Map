@@ -187,8 +187,10 @@ export default function Graph3D({ width, height }: Props) {
     const scene = new THREE.Scene()
     sceneRef.current = scene
 
-    const camera = new THREE.PerspectiveCamera(60, width / height, 1, 2000)
-    camera.position.set(0, 0, 600)
+    const camera = new THREE.PerspectiveCamera(60, width / height, 1, 5000)
+    // Start farther back for large graphs so all nodes are visible initially
+    const camZ = Math.max(600, Math.sqrt(nodes.length) * 55)
+    camera.position.set(0, 0, camZ)
     cameraRef.current = camera
 
     // OrbitControls

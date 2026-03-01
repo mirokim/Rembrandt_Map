@@ -35,6 +35,8 @@ interface GraphState {
   physics: PhysicsParams
   /** Node IDs to highlight while AI is scanning/analyzing */
   aiHighlightNodeIds: string[]
+  /** True after the initial graph layout (fit-to-view) has been applied */
+  graphLayoutReady: boolean
 
   setSelectedNode: (id: string | null) => void
   setHoveredNode: (id: string | null) => void
@@ -46,6 +48,7 @@ interface GraphState {
   setLinks: (links: GraphLink[]) => void
   /** Phase 6: restore original mock graph */
   resetToMock: () => void
+  setGraphLayoutReady: (ready: boolean) => void
 }
 
 export const useGraphStore = create<GraphState>()((set) => ({
@@ -55,6 +58,7 @@ export const useGraphStore = create<GraphState>()((set) => ({
   hoveredNodeId: null,
   physics: { ...DEFAULT_PHYSICS },
   aiHighlightNodeIds: [],
+  graphLayoutReady: false,
 
   setSelectedNode: (selectedNodeId) => set({ selectedNodeId }),
   setHoveredNode: (hoveredNodeId) => set({ hoveredNodeId }),
@@ -64,9 +68,11 @@ export const useGraphStore = create<GraphState>()((set) => ({
       physics: { ...state.physics, ...clampPhysics(params) },
     })),
   resetPhysics: () => set({ physics: { ...DEFAULT_PHYSICS } }),
-  setNodes: (nodes) => set({ nodes }),
+  // Reset layout-ready flag whenever nodes are replaced (new vault load)
+  setNodes: (nodes) => set({ nodes, graphLayoutReady: false }),
   setLinks: (links) => set({ links }),
-  resetToMock: () => set({ nodes: MOCK_NODES, links: MOCK_LINKS }),
+  resetToMock: () => set({ nodes: MOCK_NODES, links: MOCK_LINKS, graphLayoutReady: false }),
+  setGraphLayoutReady: (graphLayoutReady) => set({ graphLayoutReady }),
 }))
 
 export { DEFAULT_PHYSICS, PHYSICS_BOUNDS }

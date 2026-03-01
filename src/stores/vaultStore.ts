@@ -22,6 +22,12 @@ interface VaultState {
   vaultFolders: string[]
   /** Runtime: true while loading/parsing files */
   isLoading: boolean
+  /** Runtime: true after the first load attempt completes (success or failure) */
+  vaultReady: boolean
+  /** Runtime: loading progress 0-100 */
+  loadingProgress: number
+  /** Runtime: human-readable loading phase description */
+  loadingPhase: string
   /** Runtime: last error message, null if none */
   error: string | null
 
@@ -29,6 +35,8 @@ interface VaultState {
   setLoadedDocuments: (docs: LoadedDocument[] | null) => void
   setVaultFolders: (folders: string[]) => void
   setIsLoading: (loading: boolean) => void
+  setVaultReady: (ready: boolean) => void
+  setLoadingProgress: (progress: number, phase?: string) => void
   setError: (error: string | null) => void
   /** Clear vault path + documents + error */
   clearVault: () => void
@@ -41,12 +49,18 @@ export const useVaultStore = create<VaultState>()(
       loadedDocuments: null,
       vaultFolders: [],
       isLoading: false,
+      vaultReady: false,
+      loadingProgress: 0,
+      loadingPhase: '',
       error: null,
 
       setVaultPath: (vaultPath) => set({ vaultPath }),
       setLoadedDocuments: (loadedDocuments) => set({ loadedDocuments }),
       setVaultFolders: (vaultFolders) => set({ vaultFolders }),
       setIsLoading: (isLoading) => set({ isLoading }),
+      setVaultReady: (vaultReady) => set({ vaultReady }),
+      setLoadingProgress: (loadingProgress, loadingPhase = '') =>
+        set({ loadingProgress, loadingPhase }),
       setError: (error) => set({ error }),
       clearVault: () =>
         set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], error: null, isLoading: false }),

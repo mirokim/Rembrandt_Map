@@ -5,6 +5,7 @@ import { useVaultStore } from '@/stores/vaultStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { Palette, Sparkles, X, Loader2 } from 'lucide-react'
 import Graph2D from './Graph2D'
+import Graph2DCanvas from './Graph2DCanvas'
 import Graph3D from './Graph3D'
 import type { NodeColorMode } from '@/types'
 import {
@@ -24,17 +25,6 @@ const COLOR_MODES: { mode: NodeColorMode; label: string }[] = [
   { mode: 'topic',    label: '주제' },
 ]
 
-const floatBtnStyle: React.CSSProperties = {
-  background: 'var(--color-bg-overlay)',
-  backdropFilter: 'blur(8px)',
-  WebkitBackdropFilter: 'blur(8px)',
-  border: '1px solid rgba(255,255,255,0.06)',
-  borderRadius: 6,
-  padding: '5px 7px',
-  cursor: 'pointer',
-  lineHeight: 1,
-  transition: 'color 0.15s',
-}
 
 interface AnalysisState {
   nodeName: string
@@ -49,6 +39,10 @@ export default function GraphPanel() {
   const { loadedDocuments } = useVaultStore()
   const { personaModels } = useSettingsStore()
   const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+
+  const floatBtnStyle: React.CSSProperties = isFast
+    ? { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '5px 7px', cursor: 'pointer', lineHeight: 1 }
+    : { background: 'var(--color-bg-overlay)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 6, padding: '5px 7px', cursor: 'pointer', lineHeight: 1, transition: 'color 0.15s' }
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -160,9 +154,11 @@ export default function GraphPanel() {
   return (
     <div ref={containerRef} className="relative overflow-hidden h-full" data-testid="graph-panel">
       {size.width > 0 && size.height > 0 && (
-        graphMode === '3d' && !isFast
-          ? <Graph3D width={size.width} height={size.height} />
-          : <Graph2D width={size.width} height={size.height} />
+        isFast
+          ? <Graph2DCanvas width={size.width} height={size.height} />
+          : graphMode === '3d'
+            ? <Graph3D width={size.width} height={size.height} />
+            : <Graph2D width={size.width} height={size.height} />
       )}
 
       {/* Bottom-left buttons */}
@@ -261,10 +257,9 @@ export default function GraphPanel() {
             right: 12,
             width: 320,
             maxHeight: 'calc(100% - 24px)',
-            background: 'var(--color-bg-overlay)',
-            backdropFilter: 'blur(14px)',
-            WebkitBackdropFilter: 'blur(14px)',
-            border: '1px solid rgba(255,255,255,0.1)',
+            background: isFast ? 'var(--color-bg-secondary)' : 'var(--color-bg-overlay)',
+            ...(isFast ? {} : { backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)' }),
+            border: isFast ? '1px solid var(--color-border)' : '1px solid rgba(255,255,255,0.1)',
             borderRadius: 10,
             display: 'flex',
             flexDirection: 'column',

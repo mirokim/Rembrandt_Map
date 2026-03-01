@@ -202,3 +202,52 @@ export function parseVaultFiles(files: VaultFile[]): LoadedDocument[] {
   }
   return results
 }
+
+// ── parseVaultFilesAsync ──────────────────────────────────────────────────────
+
+/** Number of files parsed per chunk before yielding to the event loop. */
+const PARSE_CHUNK = 10
+
+/**
+ * Async version of parseVaultFiles that yields to the event loop every
+ * PARSE_CHUNK files, allowing the UI (e.g. a loading progress bar) to update
+ * during parsing.
+ *
+ * @param onProgress  Called after each chunk: (parsed, total)
+ */
+export async function parseVaultFilesAsync(
+  files: VaultFile[],
+  onProgress?: (parsed: number, total: number) => void,
+): Promise<LoadedDocument[]> {
+  const results: LoadedDocument[] = []
+  const seenIds = new Set<string>()
+  const total = files.length
+
+  for (let i = 0; i < total; i++) {
+    const file = files[i]
+    try {
+      const doc = parseMarkdownFile(file)
+      if (seenIds.has(doc.id)) {
+        let n = 2
+        while (seenIds.has(`${doc.id}_${n}`)) n++
+        const newId = `${doc.id}_${n}`
+        logger.warn(`[markdownParser] ID 충돌: "${doc.id}" (${file.relativePath}) → "${newId}"`)
+        results.push({ ...doc, id: newId })
+        seenIds.add(newId)
+      } else {
+        seenIds.add(doc.id)
+        results.push(doc)
+      }
+    } catch (err) {
+      logger.warn(`[markdownParser] Failed to parse ${file.relativePath}:`, err)
+    }
+
+    // Yield to the event loop every PARSE_CHUNK files so the UI can repaint
+    if ((i + 1) % PARSE_CHUNK === 0 || i === total - 1) {
+      onProgress?.(i + 1, total)
+      await new Promise<void>(r => setTimeout(r, 0))
+    }
+  }
+
+  return results
+}

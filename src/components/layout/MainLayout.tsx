@@ -20,10 +20,15 @@ const RIGHT_MAX = 520
 const PANEL_SPRING = { type: 'spring', stiffness: 80, damping: 18, delay: 0.15 } as const
 const OVERLAY_TRANSITION = { duration: 0.2 }
 const COLLAPSE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 } as const
+const NO_TRANSITION = { duration: 0 } as const
 
 export default function MainLayout() {
   const { centerTab, editingDocId, leftPanelCollapsed, rightPanelCollapsed } = useUIStore()
   const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+
+  const panelTransition   = isFast ? NO_TRANSITION : PANEL_SPRING
+  const overlayTransition = isFast ? NO_TRANSITION : OVERLAY_TRANSITION
+  const collapseTransition = isFast ? NO_TRANSITION : COLLAPSE_TRANSITION
 
   // In fast mode: solid background (no blur compositing). Normal mode: frosted glass.
   const glassPanelStyle = isFast
@@ -80,9 +85,9 @@ export default function MainLayout() {
       >
         {/* TopBar float */}
         <motion.div
-          initial={{ y: -60, opacity: 0 }}
+          initial={isFast ? false : { y: -60, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={PANEL_SPRING}
+          transition={panelTransition}
           style={{
             margin: '12px 12px 0',
             flexShrink: 0,
@@ -98,13 +103,13 @@ export default function MainLayout() {
 
           {/* Left panel — File tree */}
           <motion.div
-            initial={{ x: -leftWidth, opacity: 0 }}
+            initial={isFast ? false : { x: -leftWidth, opacity: 0 }}
             animate={{
               x: 0,
               opacity: leftPanelCollapsed ? 0 : 1,
               width: leftPanelCollapsed ? 0 : leftWidth,
             }}
-            transition={leftPanelCollapsed ? COLLAPSE_TRANSITION : PANEL_SPRING}
+            transition={leftPanelCollapsed ? collapseTransition : panelTransition}
             style={{
               minWidth: leftPanelCollapsed ? 0 : leftWidth,
               margin: leftPanelCollapsed ? '0' : '8px 0 12px 12px',
@@ -153,9 +158,9 @@ export default function MainLayout() {
             {centerTab === 'editor' && (
               <motion.div
                 key={editingDocId ?? 'converter'}
-                initial={{ opacity: 0 }}
+                initial={isFast ? false : { opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={OVERLAY_TRANSITION}
+                transition={overlayTransition}
                 style={{
                   position: 'absolute',
                   inset: 0,
@@ -179,13 +184,13 @@ export default function MainLayout() {
 
           {/* Right panel — Chat */}
           <motion.div
-            initial={{ x: rightWidth, opacity: 0 }}
+            initial={isFast ? false : { x: rightWidth, opacity: 0 }}
             animate={{
               x: 0,
               opacity: rightPanelCollapsed ? 0 : 1,
               width: rightPanelCollapsed ? 0 : rightWidth,
             }}
-            transition={rightPanelCollapsed ? COLLAPSE_TRANSITION : PANEL_SPRING}
+            transition={rightPanelCollapsed ? collapseTransition : panelTransition}
             style={{
               minWidth: rightPanelCollapsed ? 0 : rightWidth,
               margin: rightPanelCollapsed ? '0' : '8px 12px 12px 0',

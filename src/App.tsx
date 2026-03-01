@@ -4,6 +4,7 @@ import { useVaultLoader } from '@/hooks/useVaultLoader'
 import { usePersonaVaultSaver } from '@/hooks/usePersonaVaultSaver'
 import LaunchPage from '@/components/launch/LaunchPage'
 import MainLayout from '@/components/layout/MainLayout'
+import LoadingOverlay from '@/components/layout/LoadingOverlay'
 
 export default function App() {
   const { appState, theme, panelOpacity, setAppState } = useUIStore()
@@ -30,7 +31,12 @@ export default function App() {
     })
   }, [vaultPath, loadVault])
 
-  return appState === 'launch'
-    ? <LaunchPage onComplete={() => setAppState('main')} />
-    : <MainLayout />
+  return (
+    <>
+      {appState === 'launch'
+        ? <LaunchPage onComplete={() => setAppState('main')} />
+        : <MainLayout />}
+      <LoadingOverlay />
+    </>
+  )
 }

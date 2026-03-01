@@ -27,6 +27,8 @@ interface Options {
   width: number
   height: number
   onTick: (simNodes: SimNode[], simLinks: SimLink[]) => void
+  /** Called once when the initial layout settles (fast: after tick(300); normal: when alpha < 0.3) */
+  onComplete?: (simNodes: SimNode[]) => void
 }
 
 /**
@@ -35,7 +37,7 @@ interface Options {
  * Reinitializes whenever the node/link dataset changes (vault load or clear).
  * Reheats separately when physics params change.
  */
-export function useGraphSimulation({ width, height, onTick }: Options) {
+export function useGraphSimulation({ width, height, onTick, onComplete }: Options) {
   const { nodes, links, physics } = useGraphStore()
   const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
   const isFastRef = useRef(isFast)
@@ -46,6 +48,8 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
   const simLinksRef = useRef<SimLink[]>([])
   const onTickRef = useRef(onTick)
   onTickRef.current = onTick
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
   // Skip reheat on initial mount — init effect handles first-run tick scheduling
   const reheatMountedRef = useRef(false)
 
@@ -72,20 +76,26 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
       .force('center', forceCenter<SimNode>(width / 2, height / 2).strength(physics.centerForce))
 
     if (isFastRef.current) {
-      // Fast mode: stop D3's auto-timer, then run 300 ticks synchronously after React
+      // Fast mode: stop D3's auto-timer, then run 150 ticks synchronously after React
       // has had one frame to render the initial SVG elements (so positions are applied).
       sim.stop()
       const tid = setTimeout(() => {
-        sim.tick(300)
+        sim.tick(150)
         onTickRef.current(simNodesRef.current, simLinksRef.current)
+        onCompleteRef.current?.(simNodesRef.current)
       }, 50)
       simRef.current = sim
       return () => { clearTimeout(tid); simRef.current = null }
     }
 
-    // Normal mode: animated RAF loop
+    // Normal mode: animated RAF loop; call onComplete once when alpha drops below 0.3
+    let completedCallback = false
     sim.on('tick', () => {
       onTickRef.current(simNodesRef.current, simLinksRef.current)
+      if (!completedCallback && sim.alpha() < 0.3) {
+        completedCallback = true
+        onCompleteRef.current?.(simNodesRef.current)
+      }
     })
 
     simRef.current = sim

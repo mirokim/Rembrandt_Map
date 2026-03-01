@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronLeft, FileText, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { MOCK_DOCUMENTS } from '@/data/mockDocuments'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 import { cn } from '@/lib/utils'
@@ -23,24 +24,25 @@ const SPEAKER_PRIORITY: Record<SpeakerId, number> = {
 export default function DocViewer() {
   const { selectedDocId, setCenterTab } = useUIStore()
   const { vaultPath, loadedDocuments } = useVaultStore()
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Mock fallback: if no vault loaded, use MOCK_DOCUMENTS
   const allDocuments = (vaultPath && loadedDocuments) ? loadedDocuments : MOCK_DOCUMENTS
   const doc = allDocuments.find(d => d.id === selectedDocId)
 
-  // Virtualize only when there are enough sections to benefit.
-  // Below the threshold we render directly, which keeps tests simple and avoids
-  // ResizeObserver measurement overhead for small documents.
-  const VIRTUALIZE_THRESHOLD = 15
+  // Fast mode: lower threshold so almost all docs are virtualized (SVG skeletons are compact).
+  // Normal mode: only virtualize large docs to keep tests and small-doc render simple.
+  const VIRTUALIZE_THRESHOLD = isFast ? 3 : 15
   const sectionCount = doc?.sections.length ?? 0
   const shouldVirtualize = sectionCount >= VIRTUALIZE_THRESHOLD
 
   const virtualizer = useVirtualizer({
     count: shouldVirtualize ? sectionCount : 0,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 120,
-    overscan: 4,
+    // SVG skeleton sections are compact (~60px); normal rendered paragraphs average ~120px
+    estimateSize: () => isFast ? 60 : 120,
+    overscan: isFast ? 2 : 4,
     initialRect: { width: 0, height: 2000 },
   })
 

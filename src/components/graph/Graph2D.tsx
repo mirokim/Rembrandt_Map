@@ -16,7 +16,7 @@ interface Props {
 const LABEL_Y_OFFSET = 16  // px below node center
 
 export default function Graph2D({ width, height }: Props) {
-  const { nodes, links, selectedNodeId, hoveredNodeId, aiHighlightNodeIds, setSelectedNode, setHoveredNode, physics } = useGraphStore()
+  const { nodes, links, selectedNodeId, hoveredNodeId, aiHighlightNodeIds, setSelectedNode, setHoveredNode, physics, setGraphLayoutReady } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
   const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
@@ -95,7 +95,33 @@ export default function Graph2D({ width, height }: Props) {
     })
   }, [])  // stable — reads selectedNodeId via ref, no deps needed
 
-  const { simRef, simNodesRef } = useGraphSimulation({ width, height, onTick: handleTick })
+  // ── Fit all nodes into viewport ───────────────────────────────────────────
+  const fitView = useCallback((simNodes: SimNode[]) => {
+    if (simNodes.length === 0 || !graphGroupRef.current) return
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const n of simNodes) {
+      if (n.x < minX) minX = n.x
+      if (n.x > maxX) maxX = n.x
+      if (n.y < minY) minY = n.y
+      if (n.y > maxY) maxY = n.y
+    }
+    const graphW = Math.max(maxX - minX, 100)
+    const graphH = Math.max(maxY - minY, 100)
+    const padding = 48
+    const scaleX = (width - padding * 2) / graphW
+    const scaleY = (height - padding * 2) / graphH
+    const scale = Math.min(scaleX, scaleY, 2)
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    viewRef.current = { x: width / 2 - cx * scale, y: height / 2 - cy * scale, scale }
+    graphGroupRef.current.setAttribute(
+      'transform',
+      `translate(${viewRef.current.x},${viewRef.current.y}) scale(${viewRef.current.scale})`
+    )
+    setGraphLayoutReady(true)
+  }, [width, height, setGraphLayoutReady])
+
+  const { simRef, simNodesRef } = useGraphSimulation({ width, height, onTick: handleTick, onComplete: fitView })
 
   // ── Node data map: ID → GraphNode for O(1) hover lookups ─────────────────
   useEffect(() => {
@@ -472,7 +498,7 @@ export default function Graph2D({ width, height }: Props) {
                   style={{
                     cursor: 'grab',
                     filter: isSelected ? `drop-shadow(0 0 6px ${color})` : undefined,
-                    transition: 'r 0.15s, fill-opacity 0.15s',
+                    transition: isFast ? undefined : 'r 0.15s, fill-opacity 0.15s',
                   }}
                   onClick={() => handleNodeClick(node.id)}
                   onDoubleClick={() => handleNodeDoubleClick(node.id, node.docId)}

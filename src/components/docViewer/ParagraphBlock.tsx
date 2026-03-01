@@ -23,11 +23,18 @@ function preprocessWikiLinks(text: string): string {
   })
 }
 
-/** Strip wiki-link syntax to plain display text for fast mode */
-function stripWikiLinks(text: string): string {
-  return text.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
-    const parts = inner.split('|')
-    return parts.length > 1 ? parts[1].trim() : parts[0].split('#')[0].trim()
+/**
+ * Build SVG skeleton line widths from body text.
+ * Each non-empty line → a bar whose width is proportional to line character count.
+ * Capped at 20 lines and 98% width max.
+ */
+function buildSkeletonLines(body: string): number[] {
+  const lines = body.split('\n').filter(l => l.trim().length > 0)
+  if (lines.length === 0) return [55]
+  return lines.slice(0, 20).map(line => {
+    const len = line.trim().length
+    // Map character count to percentage width (80 chars ≈ full width)
+    return Math.min(98, Math.max(15, Math.round((len / 80) * 100)))
   })
 }
 
@@ -35,19 +42,43 @@ function ParagraphBlock({ section, speaker }: Props) {
   const [hovered, setHovered] = useState(false)
   const speakerColor = SPEAKER_CONFIG[speaker].color
   const paragraphRenderQuality = useSettingsStore(s => s.paragraphRenderQuality)
+  const isFast = paragraphRenderQuality === 'fast'
 
   const processedBody = useMemo(() => {
     if (paragraphRenderQuality === 'high') return preprocessWikiLinks(section.body)
-    if (paragraphRenderQuality === 'fast') return stripWikiLinks(section.body)
-    return section.body // medium: raw body, ReactMarkdown handles standard markdown
+    return section.body // medium/fast: raw body
   }, [section.body, paragraphRenderQuality])
 
+  // Fast mode: SVG skeleton lines (vector-image-like, no text DOM nodes)
+  const skeletonLines = useMemo(() => {
+    if (!isFast) return null
+    return buildSkeletonLines(section.body)
+  }, [isFast, section.body])
+
   const bodyContent = useMemo(() => {
-    if (paragraphRenderQuality === 'fast') {
+    if (isFast) {
+      // Render as SVG vector skeleton — lightweight, no text layout
+      const lines = skeletonLines!
+      const svgHeight = lines.length * 13
       return (
-        <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-          {processedBody}
-        </p>
+        <svg
+          width="100%"
+          height={svgHeight}
+          style={{ display: 'block', opacity: 0.22 }}
+          aria-hidden="true"
+        >
+          {lines.map((w, i) => (
+            <rect
+              key={i}
+              x={0}
+              y={i * 13}
+              width={`${w}%`}
+              height={7}
+              rx={3}
+              fill="var(--color-text-secondary)"
+            />
+          ))}
+        </svg>
       )
     }
 
@@ -82,32 +113,30 @@ function ParagraphBlock({ section, speaker }: Props) {
         {processedBody}
       </ReactMarkdown>
     )
-  }, [processedBody, paragraphRenderQuality])
-
-  const isFast = paragraphRenderQuality === 'fast'
+  }, [processedBody, paragraphRenderQuality, isFast, skeletonLines])
 
   return (
     <div
       className="mb-6 pl-3"
       style={{
-        borderLeft: hovered
+        borderLeft: (!isFast && hovered)
           ? `2px solid ${speakerColor}`
           : '2px solid transparent',
-        background: hovered
-          ? `${speakerColor}0d` // ~5% opacity tint
+        background: (!isFast && hovered)
+          ? `${speakerColor}0d`
           : 'transparent',
         transition: isFast ? undefined : 'background 0.15s, border-color 0.15s',
         borderRadius: '0 4px 4px 0',
         padding: '4px 0 4px 12px',
       }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={isFast ? undefined : () => setHovered(true)}
+      onMouseLeave={isFast ? undefined : () => setHovered(false)}
       data-testid={`paragraph-block-${section.id}`}
       data-hovered={hovered ? 'true' : undefined}
     >
       <h2
         className="text-xs font-semibold mb-2 uppercase tracking-wide"
-        style={{ color: speakerColor, letterSpacing: '0.07em' }}
+        style={{ color: speakerColor, letterSpacing: '0.07em', opacity: isFast ? 0.5 : 1 }}
       >
         {section.heading}
       </h2>

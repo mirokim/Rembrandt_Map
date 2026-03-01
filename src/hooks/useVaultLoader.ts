@@ -13,7 +13,7 @@ import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useBackendStore } from '@/stores/backendStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { parseVaultFiles } from '@/lib/markdownParser'
+import { parseVaultFilesAsync } from '@/lib/markdownParser'
 import { buildGraph } from '@/lib/graphBuilder'
 import { vaultDocsToChunks } from '@/lib/vaultToChunks'
 import { parsePersonaConfig } from '@/lib/personaVaultConfig'
@@ -21,7 +21,7 @@ import { tfidfIndex } from '@/lib/graphAnalysis'
 import { buildAdjacencyMap } from '@/lib/graphRAG'
 
 export function useVaultLoader() {
-  const { vaultPath, setLoadedDocuments, setVaultFolders, setIsLoading, setError } =
+  const { vaultPath, setLoadedDocuments, setVaultFolders, setIsLoading, setVaultReady, setLoadingProgress, setError } =
     useVaultStore()
   const { setNodes, setLinks, resetToMock } = useGraphStore()
   const { setIndexing, setChunkCount, setError: setBackendError } = useBackendStore()
@@ -34,11 +34,13 @@ export function useVaultLoader() {
         return
       }
       setIsLoading(true)
+      setLoadingProgress(0, '볼트 초기화 중...')
       setError(null)
       try {
         const { files, folders } = await window.vaultAPI.loadFiles(dirPath)
         logger.debug(`[vault] ${files?.length ?? 0}개 파일, ${folders?.length ?? 0}개 폴더 로드됨 (${dirPath})`)
         setVaultFolders(folders ?? [])
+        setLoadingProgress(5, '파일 목록 로드 완료')
 
         if (!files || files.length === 0) {
           setLoadedDocuments(null)
@@ -47,7 +49,11 @@ export function useVaultLoader() {
           return
         }
 
-        const docs = parseVaultFiles(files)
+        const total = files.length
+        const docs = await parseVaultFilesAsync(files, (parsed) => {
+          const pct = 5 + Math.round((parsed / total) * 80)
+          setLoadingProgress(pct, `문서 파싱 중... (${parsed}/${total})`)
+        })
         logger.debug(`[vault] ${docs.length}/${files.length}개 문서 파싱 성공`)
         setLoadedDocuments(docs)
 
@@ -71,10 +77,12 @@ export function useVaultLoader() {
         }
 
         // Update graph
+        setLoadingProgress(90, '그래프 구성 중...')
         const { nodes, links } = buildGraph(docs)
         logger.debug(`[vault] 그래프: ${nodes.length}개 노드, ${links.length}개 링크`)
         setNodes(nodes)
         setLinks(links)
+        setLoadingProgress(95, '설정 불러오는 중...')
 
         // TF-IDF 인덱스 빌드 (비동기적으로 백그라운드 실행 — UI 블로킹 방지)
         setTimeout(() => {
@@ -113,11 +121,14 @@ export function useVaultLoader() {
         setLoadedDocuments(null)
         resetToMock()
       } finally {
+        setLoadingProgress(100, '')
+        setVaultReady(true)
         setIsLoading(false)
       }
     },
-    [setLoadedDocuments, setVaultFolders, setIsLoading, setError, setNodes, setLinks, resetToMock,
-     setIndexing, setChunkCount, setBackendError, loadVaultPersonas, resetVaultPersonas]
+    [setLoadedDocuments, setVaultFolders, setIsLoading, setVaultReady, setLoadingProgress, setError,
+     setNodes, setLinks, resetToMock, setIndexing, setChunkCount, setBackendError,
+     loadVaultPersonas, resetVaultPersonas]
   )
 
   return { vaultPath, loadVault }
