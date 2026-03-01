@@ -90,32 +90,52 @@ export async function convertToObsidianMD(
     `6. 각 핵심 키워드를 ## 소제목으로 사용하여 관련 내용 정리\n\n` +
     `제목: ${meta.title}\n유형: ${meta.type}\n\n원문:\n${rawContent}`
 
-  const messages = [{ role: 'user' as const, content: userMessage }]
+  const messages = [{ role: 'user' as const, content: sanitize(userMessage) }]
+  const cleanSystemPromptMd = sanitize(systemPrompt)
 
   switch (model.provider) {
     case 'anthropic': {
       const { streamCompletion } = await import('./providers/anthropic')
-      await streamCompletion(apiKey, modelId, systemPrompt, messages, onChunk)
+      await streamCompletion(apiKey, modelId, cleanSystemPromptMd, messages, onChunk)
       break
     }
     case 'openai': {
       const { streamCompletion } = await import('./providers/openai')
-      await streamCompletion(apiKey, modelId, systemPrompt, messages, onChunk)
+      await streamCompletion(apiKey, modelId, cleanSystemPromptMd, messages, onChunk)
       break
     }
     case 'gemini': {
       const { streamCompletion } = await import('./providers/gemini')
-      await streamCompletion(apiKey, modelId, systemPrompt, messages, onChunk)
+      await streamCompletion(apiKey, modelId, cleanSystemPromptMd, messages, onChunk)
       break
     }
     case 'grok': {
       const { streamCompletion } = await import('./providers/grok')
-      await streamCompletion(apiKey, modelId, systemPrompt, messages, onChunk)
+      await streamCompletion(apiKey, modelId, cleanSystemPromptMd, messages, onChunk)
       break
     }
     default:
       onChunk(fallbackOutput)
   }
+}
+
+// ── Unicode sanitization ───────────────────────────────────────────────────────
+
+/**
+ * Remove lone Unicode surrogates from a string.
+ *
+ * JavaScript strings are UTF-16. Slicing document content at a byte boundary
+ * (e.g. body.slice(0, 1500)) can split a surrogate pair, leaving an orphaned
+ * high surrogate (U+D800–DBFF) or low surrogate (U+DC00–DFFF).
+ * JSON.stringify then produces invalid JSON and Anthropic's API returns 400.
+ *
+ * Regex: match valid pair (keep) OR lone surrogate (remove).
+ */
+function sanitize(str: string): string {
+  return str.replace(
+    /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g,
+    m => m.length === 2 ? m : ''
+  )
 }
 
 // ── Message history conversion ─────────────────────────────────────────────────
@@ -318,26 +338,27 @@ export async function streamMessage(
   const historyMessages = toHistoryMessages(
     history.filter((m) => m.content !== userMessage || m.role !== 'user')
   )
+  const cleanSystemPrompt = sanitize(systemPrompt)
   const allMessages = [
     ...historyMessages,
-    { role: 'user' as const, content: fullUserMessage },
+    { role: 'user' as const, content: sanitize(fullUserMessage) },
   ]
 
   // Dynamically import the provider module to keep bundle splitting clean
   switch (model.provider) {
     case 'anthropic': {
       const { streamCompletion } = await import('./providers/anthropic')
-      await streamCompletion(apiKey, modelId, systemPrompt, allMessages, onChunk, imageAttachments)
+      await streamCompletion(apiKey, modelId, cleanSystemPrompt, allMessages, onChunk, imageAttachments)
       break
     }
     case 'openai': {
       const { streamCompletion } = await import('./providers/openai')
-      await streamCompletion(apiKey, modelId, systemPrompt, allMessages, onChunk, imageAttachments)
+      await streamCompletion(apiKey, modelId, cleanSystemPrompt, allMessages, onChunk, imageAttachments)
       break
     }
     case 'gemini': {
       const { streamCompletion } = await import('./providers/gemini')
-      await streamCompletion(apiKey, modelId, systemPrompt, allMessages, onChunk, imageAttachments)
+      await streamCompletion(apiKey, modelId, cleanSystemPrompt, allMessages, onChunk, imageAttachments)
       break
     }
     case 'grok': {
@@ -346,7 +367,7 @@ export async function streamMessage(
       if (imageAttachments.length > 0) {
         onChunk('[Grok은 이미지 분석을 지원하지 않습니다. 텍스트만 처리됩니다.]\n\n')
       }
-      await streamCompletion(apiKey, modelId, systemPrompt, allMessages, onChunk)
+      await streamCompletion(apiKey, modelId, cleanSystemPrompt, allMessages, onChunk)
       break
     }
     default: {

@@ -44,6 +44,31 @@ export function tokenizeQuery(text: string): string[] {
   return _tokenize(text)
 }
 
+// ── Recency helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Returns a comparable recency value (ms since epoch) for a document.
+ * Priority: filesystem mtime > frontmatter date string > 0 (unknown).
+ */
+function getDocRecency(doc: LoadedDocument): number {
+  if (doc.mtime) return doc.mtime
+  if (doc.date) {
+    const ms = Date.parse(doc.date)
+    if (!isNaN(ms)) return ms
+  }
+  return 0
+}
+
+/**
+ * Returns a short date label (YYYY-MM-DD) for context headers.
+ * Empty string when date is unavailable.
+ */
+function getDocDateLabel(doc: LoadedDocument): string {
+  if (doc.date) return doc.date.slice(0, 10)
+  if (doc.mtime) return new Date(doc.mtime).toISOString().slice(0, 10)
+  return ''
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 /**
@@ -331,6 +356,12 @@ export function rerankResults(
 
   if (queryStems.size === 0) return results.slice(0, topN)
 
+  // Build docMap once for recency lookups (O(n) outside the loop)
+  const { loadedDocuments: _docs } = useVaultStore.getState()
+  const _docMap = _docs ? new Map(_docs.map(d => [d.id, d])) : new Map<string, LoadedDocument>()
+  const now = Date.now()
+  const RECENCY_DECAY_MS = 90 * 24 * 60 * 60 * 1000  // 90-day half-life
+
   const scored = results.map(r => {
     // Check content using substring matching (handles Korean particles in content too)
     const contentLower = (r.content + ' ' + (r.heading ?? '')).toLowerCase()
@@ -348,7 +379,11 @@ export function rerankResults(
         ? 0.1
         : 0
 
-    const finalScore = 0.6 * r.score + 0.3 * keywordScore + speakerBoost
+    // Recency boost: recent docs get up to +5% (exponential decay, 90-day half-life)
+    const recMs = (() => { const d = _docMap.get(r.doc_id); return d ? getDocRecency(d) : 0 })()
+    const recencyBoost = recMs > 0 ? 0.05 * Math.exp(-(now - recMs) / RECENCY_DECAY_MS) : 0
+
+    const finalScore = 0.6 * r.score + 0.3 * keywordScore + speakerBoost + recencyBoost
 
     return { result: r, finalScore }
   })
@@ -557,8 +592,11 @@ export function buildDeepGraphContext(
   const visited = bfsFromDocIds(startDocIds, adjacency, maxHops, maxDocs)
   if (visited.size === 0) return ''
 
-  // 홉 거리 기준 정렬
-  const sorted = [...visited.entries()].sort((a, b) => a[1] - b[1])
+  // 홉 거리 기준 정렬 (같은 홉 내에서는 최신 문서 우선)
+  const rec = (id: string) => { const d = docMap.get(id); return d ? getDocRecency(d) : 0 }
+  const sorted = [...visited.entries()].sort((a, b) =>
+    a[1] !== b[1] ? a[1] - b[1] : rec(b[0]) - rec(a[0])
+  )
 
   // 구조 헤더 (PageRank + 클러스터 개요)
   const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments, docMap, getMetrics)
@@ -578,7 +616,8 @@ export function buildDeepGraphContext(
     const label = hopLabel[hop] ?? `${hop}홉`
     const name = doc.filename.replace(/\.md$/i, '')
     const speaker = doc.speaker && doc.speaker !== 'unknown' ? ` (${doc.speaker})` : ''
-    const header = `[${label}] ${name}${speaker}`
+    const dateLabel = getDocDateLabel(doc)
+    const header = `[${label}] ${name}${speaker}${dateLabel ? ` [${dateLabel}]` : ''}`
 
     // B. 패시지-레벨 검색: queryTerms가 있으면 가장 관련된 섹션 선택
     const content = getDocContent(doc, budget, queryTerms)
@@ -640,7 +679,10 @@ export function buildDeepGraphContextFromDocId(
 
   const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments, docMap, getMetrics)
 
-  const sorted = [...visited.entries()].sort((a, b) => a[1] - b[1])
+  const rec2 = (id: string) => { const d = docMap.get(id); return d ? getDocRecency(d) : 0 }
+  const sorted = [...visited.entries()].sort((a, b) =>
+    a[1] !== b[1] ? a[1] - b[1] : rec2(b[0]) - rec2(a[0])
+  )
   const hopLabel = ['선택', '1홉', '2홉', '3홉']
   const parts: string[] = [structureHeader, '## 선택 노드 관련 문서 (그래프 탐색)\n']
   let charCount = structureHeader.length + 25
@@ -654,7 +696,8 @@ export function buildDeepGraphContextFromDocId(
     const label = hopLabel[hop] ?? `${hop}홉`
     const name = doc.filename.replace(/\.md$/i, '')
     const speaker = doc.speaker && doc.speaker !== 'unknown' ? ` (${doc.speaker})` : ''
-    const header = `[${label}] ${name}${speaker}`
+    const dateLabel = getDocDateLabel(doc)
+    const header = `[${label}] ${name}${speaker}${dateLabel ? ` [${dateLabel}]` : ''}`
     const content = getDocContent(doc, budget)
     const entry = `${header}\n${content}\n\n`
     if (charCount + entry.length > DEEP_CONTEXT_BUDGET) break
@@ -841,7 +884,10 @@ export function buildGlobalGraphContext(
   const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments, docMap, getMetrics)
 
   const GLOBAL_BUDGET = 24000
-  const sorted = [...visited.entries()].sort((a, b) => a[1] - b[1])
+  const rec3 = (id: string) => { const d = docMap.get(id); return d ? getDocRecency(d) : 0 }
+  const sorted = [...visited.entries()].sort((a, b) =>
+    a[1] !== b[1] ? a[1] - b[1] : rec3(b[0]) - rec3(a[0])
+  )
   const parts: string[] = [structureHeader, '## 전체 프로젝트 관련 문서 (허브 기반 탐색)\n']
   let charCount = structureHeader.length + 28
 
@@ -853,7 +899,8 @@ export function buildGlobalGraphContext(
     const budget = HOP_CHAR_BUDGET[Math.min(hop, HOP_CHAR_BUDGET.length - 1)] ?? 80
     const name = doc.filename.replace(/\.md$/i, '')
     const speaker = doc.speaker && doc.speaker !== 'unknown' ? ` (${doc.speaker})` : ''
-    const header = `[탐색] ${name}${speaker}`
+    const dateLabel = getDocDateLabel(doc)
+    const header = `[탐색] ${name}${speaker}${dateLabel ? ` [${dateLabel}]` : ''}`
     const content = getDocContent(doc, budget)
     const entry = `${header}\n${content}\n\n`
     if (charCount + entry.length > GLOBAL_BUDGET) break
