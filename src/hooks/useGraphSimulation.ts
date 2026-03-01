@@ -69,17 +69,13 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
       .force('charge', forceManyBody<SimNode>().strength(physics.charge))
       .force('center', forceCenter<SimNode>(width / 2, height / 2).strength(physics.centerForce))
 
-    if (isFastRef.current) {
-      // Fast mode: run all ticks synchronously then stop — no ongoing animation loop
-      const tickCount = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()))
-      sim.tick(tickCount)
-      sim.stop()
+    // Fast mode: stop after fewer ticks (runs via RAF, not sync — avoids main-thread block)
+    const MAX_TICKS_FAST = 80
+    let ticksDone = 0
+    sim.on('tick', () => {
       onTickRef.current(simNodesRef.current, simLinksRef.current)
-    } else {
-      sim.on('tick', () => {
-        onTickRef.current(simNodesRef.current, simLinksRef.current)
-      })
-    }
+      if (isFastRef.current && ++ticksDone >= MAX_TICKS_FAST) sim.stop()
+    })
 
     simRef.current = sim
     return () => {

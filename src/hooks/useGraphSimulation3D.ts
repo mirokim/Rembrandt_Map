@@ -96,17 +96,14 @@ export function useGraphSimulation3D({ onTick }: Options) {
           }
         })
 
-      if (isFastRef.current) {
-        // Fast mode: run all ticks synchronously then stop — no ongoing animation loop
-        const tickCount = Math.ceil(Math.log(sim.alphaMin()) / Math.log(1 - sim.alphaDecay()))
-        sim.tick(tickCount)
-        sim.stop()
+      // Fast mode: stop after fewer ticks (runs via RAF, not sync — avoids main-thread block
+      // and ensures scene meshes are built before the first onTick fires)
+      const MAX_TICKS_FAST = 80
+      let ticksDone = 0
+      sim.on('tick', () => {
         onTickRef.current(simNodesRef.current, simLinksRef.current)
-      } else {
-        sim.on('tick', () => {
-          onTickRef.current(simNodesRef.current, simLinksRef.current)
-        })
-      }
+        if (isFastRef.current && ++ticksDone >= MAX_TICKS_FAST) sim.stop()
+      })
 
       simRef.current = sim
     })
