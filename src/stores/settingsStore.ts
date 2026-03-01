@@ -22,6 +22,8 @@ export interface ProjectInfo {
   teamMembers: string
   /** Raw project info as pasted/uploaded MD content (replaces individual fields in UI) */
   rawProjectInfo: string
+  /** Current real-world situation to supplement vault data (MD format, injected into AI prompts) */
+  currentSituation: string
 }
 
 export const DEFAULT_PROJECT_INFO: ProjectInfo = {
@@ -34,6 +36,7 @@ export const DEFAULT_PROJECT_INFO: ProjectInfo = {
   description: '',
   teamMembers: '',
   rawProjectInfo: '',
+  currentSituation: '',
 }
 
 export interface CustomPersona {

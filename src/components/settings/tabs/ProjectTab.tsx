@@ -63,6 +63,21 @@ export default function ProjectTab() {
         />
       </section>
 
+      {/* 현재 상황 */}
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>현재 상황</label>
+          <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>볼트 데이터와 다른 최신 현실 정보 · MD 형식 지원</span>
+        </div>
+        <textarea
+          value={projectInfo.currentSituation}
+          onChange={e => setProjectInfo({ currentSituation: e.target.value })}
+          placeholder={'## 현재 스프린트\n- 알파 테스트 진행 중 (2주 남음)\n- 전투 시스템 우선순위\n\n## 최근 결정사항\n- ...'}
+          rows={7}
+          style={{ ...fieldInputStyle, resize: 'vertical', lineHeight: 1.6 }}
+        />
+      </section>
+
       {/* 팀원 */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
