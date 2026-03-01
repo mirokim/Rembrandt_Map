@@ -75,6 +75,9 @@ export default function Graph3D({ width, height }: Props) {
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
   const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+  const isFastRef = useRef(isFast)
+  isFastRef.current = isFast
   const tagColors = useSettingsStore(s => s.tagColors)
   const folderColors = useSettingsStore(s => s.folderColors)
 
@@ -683,8 +686,8 @@ export default function Graph3D({ width, height }: Props) {
           : null
         if (newHoverId !== lastHoveredRef.current) {
           lastHoveredRef.current = newHoverId
-          setHoveredNode(newHoverId)
-          // Tooltip only on click/mousedown — not on hover
+          // Fast mode: skip hover effects (no label reveal, no neighbor highlight)
+          if (!isFastRef.current) setHoveredNode(newHoverId)
         }
       })
     }

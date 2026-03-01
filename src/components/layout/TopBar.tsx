@@ -13,6 +13,7 @@ export default function TopBar() {
     toggleLeftPanel, toggleRightPanel,
   } = useUIStore()
   const { toggleSettingsPanel } = useSettingsStore()
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
 
   const isElectron =
     typeof window !== 'undefined' && window.electronAPI?.isElectron === true
@@ -46,8 +47,8 @@ export default function TopBar() {
       {/* Right controls */}
       <div className="flex items-center gap-1" style={noDragStyle}>
 
-        {/* 3D / 2D toggle */}
-        <button
+        {/* 3D / 2D toggle — hidden in fast mode (always 2D) */}
+        {!isFast && <button
           onClick={() => setGraphMode(graphMode === '3d' ? '2d' : '3d')}
           className={cn(
             'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors',
@@ -59,7 +60,7 @@ export default function TopBar() {
         >
           <Monitor size={13} />
           <span>{graphMode.toUpperCase()}</span>
-        </button>
+        </button>}
 
         {/* Panel opacity slider — right of 3D toggle */}
         <div className="flex items-center gap-1.5 px-2">

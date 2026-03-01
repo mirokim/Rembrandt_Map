@@ -46,6 +46,8 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
   const simLinksRef = useRef<SimLink[]>([])
   const onTickRef = useRef(onTick)
   onTickRef.current = onTick
+  // Skip reheat on initial mount — init effect handles first-run tick scheduling
+  const reheatMountedRef = useRef(false)
 
   // Initialize (or reinitialize) simulation when nodes/links dataset changes
   useEffect(() => {
@@ -69,12 +71,21 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
       .force('charge', forceManyBody<SimNode>().strength(physics.charge))
       .force('center', forceCenter<SimNode>(width / 2, height / 2).strength(physics.centerForce))
 
-    // Fast mode: stop after fewer ticks (runs via RAF, not sync — avoids main-thread block)
-    const MAX_TICKS_FAST = 80
-    let ticksDone = 0
+    if (isFastRef.current) {
+      // Fast mode: stop D3's auto-timer, then run 300 ticks synchronously after React
+      // has had one frame to render the initial SVG elements (so positions are applied).
+      sim.stop()
+      const tid = setTimeout(() => {
+        sim.tick(300)
+        onTickRef.current(simNodesRef.current, simLinksRef.current)
+      }, 50)
+      simRef.current = sim
+      return () => { clearTimeout(tid); simRef.current = null }
+    }
+
+    // Normal mode: animated RAF loop
     sim.on('tick', () => {
       onTickRef.current(simNodesRef.current, simLinksRef.current)
-      if (isFastRef.current && ++ticksDone >= MAX_TICKS_FAST) sim.stop()
     })
 
     simRef.current = sim
@@ -87,7 +98,9 @@ export function useGraphSimulation({ width, height, onTick }: Options) {
   }, [width, height, nodes, links])
 
   // Reheat when physics params or quality mode change
+  // Skip initial mount: init effect already schedules ticks; reheat must not prematurely stop the sim
   useEffect(() => {
+    if (!reheatMountedRef.current) { reheatMountedRef.current = true; return }
     const sim = simRef.current
     if (!sim) return
     ;(sim.force('link') as ReturnType<typeof forceLink<SimNode, SimLink>> | null)

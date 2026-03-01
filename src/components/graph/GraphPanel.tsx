@@ -48,6 +48,7 @@ export default function GraphPanel() {
   const { selectedNodeId, setAiHighlightNodes } = useGraphStore()
   const { loadedDocuments } = useVaultStore()
   const { personaModels } = useSettingsStore()
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -159,7 +160,7 @@ export default function GraphPanel() {
   return (
     <div ref={containerRef} className="relative overflow-hidden h-full" data-testid="graph-panel">
       {size.width > 0 && size.height > 0 && (
-        graphMode === '3d'
+        graphMode === '3d' && !isFast
           ? <Graph3D width={size.width} height={size.height} />
           : <Graph2D width={size.width} height={size.height} />
       )}

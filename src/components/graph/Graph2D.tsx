@@ -19,6 +19,9 @@ export default function Graph2D({ width, height }: Props) {
   const { nodes, links, selectedNodeId, hoveredNodeId, aiHighlightNodeIds, setSelectedNode, setHoveredNode, physics } = useGraphStore()
   const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
+  const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+  const isFastRef = useRef(isFast)
+  isFastRef.current = isFast
   const tagColors = useSettingsStore(s => s.tagColors)
   const folderColors = useSettingsStore(s => s.folderColors)
 
@@ -307,7 +310,9 @@ export default function Graph2D({ width, height }: Props) {
   }, [setSelectedNode, setSelectedDoc, openInEditor])
 
   // Hover: highlight only — tooltip appears on mousedown/click, not hover
+  // Fast mode: skip hover entirely (no label reveal, no neighbor highlight)
   const handleMouseEnter = useCallback((nodeId: string) => {
+    if (isFastRef.current) return
     setHoveredNode(nodeId)
   }, [setHoveredNode])
 
