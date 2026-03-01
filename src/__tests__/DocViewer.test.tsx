@@ -1,15 +1,21 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { MOCK_DOCUMENTS } from '@/data/mockDocuments'
 import { MOCK_NODES } from '@/data/mockGraph'
 import { parseWikiLinks } from '@/lib/wikiLinkParser'
 import { DEFAULT_PHYSICS } from '@/stores/graphStore'
 
+// Give jsdom a non-zero container size so @tanstack/react-virtual renders items
+const mockRect = { width: 800, height: 600, top: 0, left: 0, bottom: 600, right: 800, x: 0, y: 0, toJSON: () => ({}) }
+let rectSpy: ReturnType<typeof vi.spyOn>
+
 let DocViewer: typeof import('@/components/docViewer/DocViewer').default
 
 beforeEach(async () => {
+  rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect as DOMRect)
   useUIStore.setState({
     appState: 'main', centerTab: 'document',
     selectedDocId: null, theme: 'dark', graphMode: '2d',
@@ -21,6 +27,10 @@ beforeEach(async () => {
   })
   const mod = await import('@/components/docViewer/DocViewer')
   DocViewer = mod.default
+})
+
+afterEach(() => {
+  rectSpy.mockRestore()
 })
 
 describe('DocViewer — empty state', () => {
@@ -139,6 +149,11 @@ describe('ParagraphBlock — hover highlight', () => {
 })
 
 describe('WikiLink — navigation', () => {
+  beforeEach(() => {
+    // WikiLink components only render in 'high' quality mode
+    useSettingsStore.setState({ paragraphRenderQuality: 'high' })
+  })
+
   it('clicking a wiki link navigates to the matching graph node', () => {
     // Find a doc+section that has at least one wikiLink that resolves to another doc's section
     // Phase 7: nodes are document-level, so wikiLink slugs match section IDs → parent doc

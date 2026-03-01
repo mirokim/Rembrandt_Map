@@ -3,7 +3,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { Palette, Sparkles, X, Loader2, Eye, EyeOff } from 'lucide-react'
+import { Palette, Sparkles, X, Loader2 } from 'lucide-react'
 import Graph2D from './Graph2D'
 import Graph3D from './Graph3D'
 import type { NodeColorMode } from '@/types'
@@ -18,7 +18,6 @@ import { streamMessage } from '@/services/llmClient'
 const COLOR_MODES: { mode: NodeColorMode; label: string }[] = [
   { mode: 'document', label: '문서' },
   { mode: 'auto',     label: '자동' },
-  { mode: 'rules',    label: '규칙' },
   { mode: 'speaker',  label: '역할' },
   { mode: 'folder',   label: '폴더' },
   { mode: 'tag',      label: '태그' },
@@ -45,7 +44,7 @@ interface AnalysisState {
 }
 
 export default function GraphPanel() {
-  const { graphMode, nodeColorMode, setNodeColorMode, showNodeLabels, toggleNodeLabels } = useUIStore()
+  const { graphMode, nodeColorMode, setNodeColorMode } = useUIStore()
   const { selectedNodeId, setAiHighlightNodes } = useGraphStore()
   const { loadedDocuments } = useVaultStore()
   const { personaModels } = useSettingsStore()
@@ -224,19 +223,6 @@ export default function GraphPanel() {
             </div>
           )}
         </div>
-
-        {/* 노드 라벨 토글 버튼 */}
-        <button
-          onClick={toggleNodeLabels}
-          style={{
-            ...floatBtnStyle,
-            color: showNodeLabels ? 'var(--color-accent)' : 'var(--color-text-muted)',
-          }}
-          title={showNodeLabels ? '라벨 숨기기' : '라벨 표시'}
-          aria-label="Node label visibility"
-        >
-          {showNodeLabels ? <Eye size={12} /> : <EyeOff size={12} />}
-        </button>
 
         {/* AI 분석 버튼 — 항상 표시 (노드 선택 O: 노드 중심 / X: 전체 프로젝트) */}
         <button

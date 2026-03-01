@@ -100,12 +100,18 @@ export function frontendKeywordSearch(
   const { loadedDocuments } = useVaultStore.getState()
   if (!loadedDocuments || loadedDocuments.length === 0) return []
 
+  // O(1) lookup map — reuse cached version if available, else build once
+  const { links } = useGraphStore.getState()
+  const docMap = links.length > 0
+    ? getCachedMaps(links, loadedDocuments).docMap
+    : new Map(loadedDocuments.map(d => [d.id, d]))
+
   // ── TF-IDF 우선 검색 ──────────────────────────────────────────────────────
   if (tfidfIndex.isBuilt) {
     const tfidfHits = tfidfIndex.search(query, topN)
     if (tfidfHits.length > 0) {
       return tfidfHits.map(hit => {
-        const doc = loadedDocuments.find(d => d.id === hit.docId)
+        const doc = docMap.get(hit.docId)
         // 문서 내에서 쿼리와 가장 잘 매칭되는 섹션 선택
         const queryStems = tokenizeQuery(query)
         let bestSection = doc?.sections.find(s => s.body.trim())
@@ -195,18 +201,31 @@ export function frontendKeywordSearch(
 
 let _cachedAdjacency: Map<string, string[]> | null = null
 let _cachedSectionMap: Map<string, { section: DocSection; filename: string; docId: string }> | null = null
+let _cachedDocMap: Map<string, LoadedDocument> | null = null
+let _cachedMetrics: ReturnType<typeof getGraphMetrics> | null = null
 let _cachedLinksRef: GraphLink[] | null = null
 let _cachedDocsRef: LoadedDocument[] | null = null
 
 function getCachedMaps(links: GraphLink[], docs: LoadedDocument[]) {
-  // Invalidate when array reference or length changes
+  // Invalidate when array reference changes
   if (links !== _cachedLinksRef || docs !== _cachedDocsRef) {
     _cachedAdjacency = buildAdjacencyMap(links)
     _cachedSectionMap = buildSectionMap(docs)
+    _cachedDocMap = new Map(docs.map(d => [d.id, d]))
+    _cachedMetrics = null  // invalidate metrics — recomputed on next call
     _cachedLinksRef = links
     _cachedDocsRef = docs
   }
-  return { adjacency: _cachedAdjacency!, sectionMap: _cachedSectionMap! }
+  return {
+    adjacency: _cachedAdjacency!,
+    sectionMap: _cachedSectionMap!,
+    docMap: _cachedDocMap!,
+    /** Lazily compute and cache graph metrics (PageRank + clusters) */
+    getMetrics: () => {
+      if (!_cachedMetrics) _cachedMetrics = getGraphMetrics(_cachedAdjacency!, links)
+      return _cachedMetrics
+    },
+  }
 }
 
 // ── 1. Graph expansion ───────────────────────────────────────────────────────
@@ -231,7 +250,7 @@ export function expandWithGraphNeighbors(
     return []
   }
 
-  const { adjacency, sectionMap } = getCachedMaps(links, loadedDocuments)
+  const { adjacency, sectionMap, docMap } = getCachedMaps(links, loadedDocuments)
 
   // Map result section_ids to their parent doc IDs
   const primaryDocIds = new Set<string>()
@@ -262,7 +281,7 @@ export function expandWithGraphNeighbors(
       if (seenDocIds.has(neighborDocId)) continue
 
       // Find first non-empty section from the neighbor document
-      const neighborDoc = loadedDocuments.find(d => d.id === neighborDocId)
+      const neighborDoc = docMap.get(neighborDocId)
       if (!neighborDoc) continue
       const firstSection = neighborDoc.sections.find(s => s.body.trim())
       if (!firstSection) continue
@@ -498,13 +517,15 @@ export function buildDeepGraphContext(
     return ''
   }
 
+  const { adjacency, docMap, getMetrics } = getCachedMaps(links, loadedDocuments)
+
   // WikiLink 없는 볼트 — 그래프 탐색 불가, TF-IDF 결과를 직접 포맷
   if (!links.length) {
     if (results.length === 0) return ''
     const parts: string[] = ['## 관련 문서 (직접 검색)\n']
     let charCount = 20
     for (const r of results.slice(0, maxDocs)) {
-      const doc = loadedDocuments.find(d => d.id === r.doc_id)
+      const doc = docMap.get(r.doc_id)
       if (!doc) continue
       const name = doc.filename.replace(/\.md$/i, '')
       const content = getDocContent(doc, 1200, queryTerms)
@@ -516,8 +537,6 @@ export function buildDeepGraphContext(
     }
     return parts.length <= 1 ? '' : parts.join('') + '\n'
   }
-
-  const { adjacency } = getCachedMaps(links, loadedDocuments)
 
   // 시작 노드: 검색 결과 상위 문서들 (중복 제거)
   const startDocIds = [...new Set(results.map(r => r.doc_id).filter(Boolean))]
@@ -542,7 +561,7 @@ export function buildDeepGraphContext(
   const sorted = [...visited.entries()].sort((a, b) => a[1] - b[1])
 
   // 구조 헤더 (PageRank + 클러스터 개요)
-  const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments)
+  const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments, docMap, getMetrics)
 
   const hopLabel = ['직접', '1홉', '2홉', '3홉']
   const parts: string[] = [structureHeader, '## 관련 문서 (그래프 탐색)\n']
@@ -552,7 +571,7 @@ export function buildDeepGraphContext(
   for (const [docId, hop] of sorted) {
     if (charCount >= DEEP_CONTEXT_BUDGET) break
 
-    const doc = loadedDocuments.find(d => d.id === docId)
+    const doc = docMap.get(docId)
     if (!doc) continue  // phantom node or ID mismatch — skip
 
     const budget = HOP_CHAR_BUDGET[hop] ?? 80
@@ -580,7 +599,7 @@ export function buildDeepGraphContext(
     const fallback: string[] = ['## 관련 문서 (직접 검색)\n']
     let fallbackChars = 20
     for (const r of results.slice(0, maxDocs)) {
-      const doc = loadedDocuments.find(d => d.id === r.doc_id)
+      const doc = docMap.get(r.doc_id)
       if (!doc) continue
       const content = getDocContent(doc, 1200, queryTerms)
       if (!content) continue
@@ -614,12 +633,12 @@ export function buildDeepGraphContextFromDocId(
   const { loadedDocuments } = useVaultStore.getState()
   if (!loadedDocuments?.length || !links.length) return ''
 
-  const { adjacency } = getCachedMaps(links, loadedDocuments)
+  const { adjacency, docMap, getMetrics } = getCachedMaps(links, loadedDocuments)
 
   const visited = bfsFromDocIds([startDocId], adjacency, maxHops, maxDocs)
   if (visited.size === 0) return ''
 
-  const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments)
+  const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments, docMap, getMetrics)
 
   const sorted = [...visited.entries()].sort((a, b) => a[1] - b[1])
   const hopLabel = ['선택', '1홉', '2홉', '3홉']
@@ -628,7 +647,7 @@ export function buildDeepGraphContextFromDocId(
 
   for (const [docId, hop] of sorted) {
     if (charCount >= DEEP_CONTEXT_BUDGET) break
-    const doc = loadedDocuments.find(d => d.id === docId)
+    const doc = docMap.get(docId)
     if (!doc) continue
 
     const budget = HOP_CHAR_BUDGET[hop] ?? 80
@@ -662,9 +681,11 @@ function buildStructureHeader(
   visited: Map<string, number>,
   adjacency: Map<string, string[]>,
   links: GraphLink[],
-  loadedDocuments: LoadedDocument[]
+  loadedDocuments: LoadedDocument[],
+  docMap: Map<string, LoadedDocument>,
+  getMetrics: () => ReturnType<typeof getGraphMetrics>
 ): string {
-  const metrics = getGraphMetrics(adjacency, links)
+  const metrics = getMetrics()  // cached — no recomputation if adjacency/links unchanged
   const { pageRank, clusters, clusterCount } = metrics
 
   // PageRank 상위 5개 (탐색 문서 한정)
@@ -672,7 +693,7 @@ function buildStructureHeader(
     .map(id => ({ id, rank: pageRank.get(id) ?? 0 }))
     .sort((a, b) => b.rank - a.rank)
     .slice(0, 5)
-    .map(({ id }) => loadedDocuments.find(d => d.id === id)?.filename.replace(/\.md$/i, '') ?? id)
+    .map(({ id }) => docMap.get(id)?.filename.replace(/\.md$/i, '') ?? id)
 
   // C. 클러스터별 문서 그룹 + TF-IDF 주제 키워드 레이블
   const clusterTopics = getClusterTopics(clusters, loadedDocuments, 3)
@@ -681,7 +702,7 @@ function buildStructureHeader(
     const cId = clusters.get(docId)
     if (cId === undefined) continue
     if (!clusterGroups.has(cId)) clusterGroups.set(cId, [])
-    const name = loadedDocuments.find(d => d.id === docId)?.filename.replace(/\.md$/i, '') ?? docId
+    const name = docMap.get(docId)?.filename.replace(/\.md$/i, '') ?? docId
     clusterGroups.get(cId)!.push(name)
   }
   const clusterLines = [...clusterGroups.entries()]
@@ -702,7 +723,7 @@ function buildStructureHeader(
   const bridges = detectBridgeNodes(visitedAdj, clusters)
     .slice(0, 3)
     .map(b => {
-      const name = loadedDocuments.find(d => d.id === b.docId)?.filename.replace(/\.md$/i, '') ?? b.docId
+      const name = docMap.get(b.docId)?.filename.replace(/\.md$/i, '') ?? b.docId
       return `${name}(${b.clusterCount}개 클러스터 연결)`
     })
 
@@ -809,7 +830,7 @@ export function buildGlobalGraphContext(
   const { loadedDocuments } = useVaultStore.getState()
   if (!loadedDocuments?.length || !links.length) return ''
 
-  const { adjacency } = getCachedMaps(links, loadedDocuments)
+  const { adjacency, docMap, getMetrics } = getCachedMaps(links, loadedDocuments)
 
   const hubIds = getHubDocIds(adjacency, 8)
   if (hubIds.length === 0) return ''
@@ -817,7 +838,7 @@ export function buildGlobalGraphContext(
   const visited = bfsFromDocIds(hubIds, adjacency, maxHops, maxDocs)
   if (visited.size === 0) return ''
 
-  const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments)
+  const structureHeader = buildStructureHeader(visited, adjacency, links, loadedDocuments, docMap, getMetrics)
 
   const GLOBAL_BUDGET = 24000
   const sorted = [...visited.entries()].sort((a, b) => a[1] - b[1])
@@ -826,7 +847,7 @@ export function buildGlobalGraphContext(
 
   for (const [docId, hop] of sorted) {
     if (charCount >= GLOBAL_BUDGET) break
-    const doc = loadedDocuments.find(d => d.id === docId)
+    const doc = docMap.get(docId)
     if (!doc) continue
 
     const budget = HOP_CHAR_BUDGET[Math.min(hop, HOP_CHAR_BUDGET.length - 1)] ?? 80

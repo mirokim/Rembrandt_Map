@@ -17,8 +17,8 @@ const LABEL_Y_OFFSET = 16  // px below node center
 
 export default function Graph2D({ width, height }: Props) {
   const { nodes, links, selectedNodeId, hoveredNodeId, aiHighlightNodeIds, setSelectedNode, setHoveredNode, physics } = useGraphStore()
-  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor, showNodeLabels } = useUIStore()
-  const colorRules = useSettingsStore(s => s.colorRules)
+  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
+  const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
   const tagColors = useSettingsStore(s => s.tagColors)
   const folderColors = useSettingsStore(s => s.folderColors)
 
@@ -50,6 +50,11 @@ export default function Graph2D({ width, height }: Props) {
 
   // Adjacency map: nodeId → Set<linkIndex> (built from graphStore links)
   const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
+  // Node ID → node data map for O(1) lookups in hover effect
+  const nodeDataMapRef = useRef<Map<string, GraphNode>>(new Map())
+  // Track previously highlighted nodes/links for delta-only hover updates
+  const prevHighlightedNodeIds = useRef<Set<string>>(new Set())
+  const prevHighlightedLinkIdxs = useRef<Set<number>>(new Set())
 
   const [tooltip, setTooltip] = useState<{ nodeId: string; x: number; y: number } | null>(null)
 
@@ -88,6 +93,11 @@ export default function Graph2D({ width, height }: Props) {
   }, [])  // stable — reads selectedNodeId via ref, no deps needed
 
   const { simRef, simNodesRef } = useGraphSimulation({ width, height, onTick: handleTick })
+
+  // ── Node data map: ID → GraphNode for O(1) hover lookups ─────────────────
+  useEffect(() => {
+    nodeDataMapRef.current = new Map(nodes.map(n => [n.id, n]))
+  }, [nodes])
 
   // ── Build adjacency map whenever links change ──────────────────────────────
   useEffect(() => {
@@ -232,7 +242,7 @@ export default function Graph2D({ width, height }: Props) {
     labelGroupRef.current.style.display = centerTab === 'graph' ? '' : 'none'
   }, [centerTab])
 
-  // ── Inject @keyframes once on mount (avoid re-injection on every render) ───
+  // ── Inject styles once on mount ───────────────────────────────────────────
   useEffect(() => {
     const style = document.createElement('style')
     style.textContent = `
@@ -240,6 +250,9 @@ export default function Graph2D({ width, height }: Props) {
         0%, 100% { filter: drop-shadow(0 0 3px #34d399); }
         50%       { filter: drop-shadow(0 0 12px #34d399) drop-shadow(0 0 5px #34d399); }
       }
+      .graph-faded circle:not([data-hl]) { opacity: 0.12 !important; filter: none !important; }
+      .graph-faded line:not([data-hl])   { opacity: 0.04 !important; stroke: var(--color-border) !important; stroke-width: 1px !important; }
+      .graph-faded text:not([data-hl])   { opacity: 0 !important; }
     `
     document.head.appendChild(style)
     return () => { style.remove() }
@@ -308,75 +321,85 @@ export default function Graph2D({ width, height }: Props) {
     setTooltip(t => t?.nodeId === nodeId ? { nodeId, x: e.clientX, y: e.clientY } : t)
   }, [])
 
-  // ── Neighbor highlight — useLayoutEffect to avoid flicker before paint ─────
+  // ── Neighbor highlight — O(k) delta updates via CSS class + data-hl attr ───
   useLayoutEffect(() => {
     const nodeMap = nodeEls.current
     const labelMap = labelEls.current
     const linkMap = linkEls.current
+    const graphGroup = graphGroupRef.current
 
     if (!hoveredNodeId) {
-      // Reset nodes and links; label opacity depends on showNodeLabels toggle
-      nodes.forEach(n => {
-        const el = nodeMap.get(n.id)
-        if (el) { el.style.opacity = ''; el.style.filter = '' }
-        const lEl = labelMap.get(n.id)
-        if (lEl) lEl.style.opacity = showNodeLabels ? '' : '0'
+      // O(1): remove faded class → CSS restores all opacities
+      graphGroup?.classList.remove('graph-faded')
+      // O(k): restore only previously highlighted elements
+      prevHighlightedNodeIds.current.forEach(nodeId => {
+        const el = nodeMap.get(nodeId)
+        if (el) { el.removeAttribute('data-hl'); el.style.filter = '' }
+        const lEl = labelMap.get(nodeId)
+        if (lEl) { lEl.removeAttribute('data-hl'); lEl.style.opacity = '' }
       })
-      links.forEach((_: GraphLink, i: number) => {
+      prevHighlightedLinkIdxs.current.forEach(i => {
         const el = linkMap.get(i)
-        if (el) { el.style.opacity = ''; el.style.stroke = ''; el.style.strokeWidth = '' }
+        if (el) { el.removeAttribute('data-hl'); el.style.stroke = ''; el.style.strokeWidth = '' }
       })
+      prevHighlightedNodeIds.current = new Set()
+      prevHighlightedLinkIdxs.current = new Set()
       return
     }
 
-    // Resolve neighbor link indices and node IDs
+    // Resolve neighbor link indices and node IDs — O(k_links) only
     const neighborLinkIdxs = adjacencyRef.current.get(hoveredNodeId) ?? new Set<number>()
     const neighborIds = new Set<string>([hoveredNodeId])
-    links.forEach((link: GraphLink, i: number) => {
-      if (neighborLinkIdxs.has(i)) {
-        const src = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id
-        const tgt = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id
-        neighborIds.add(src)
-        neighborIds.add(tgt)
-      }
+    neighborLinkIdxs.forEach(i => {
+      const link = links[i] as GraphLink | undefined
+      if (!link) return
+      neighborIds.add(typeof link.source === 'string' ? link.source : (link.source as GraphNode).id)
+      neighborIds.add(typeof link.target === 'string' ? link.target : (link.target as GraphNode).id)
     })
 
-    const hovNode = nodes.find(n => n.id === hoveredNodeId)
+    const hovNode = nodeDataMapRef.current.get(hoveredNodeId)
     const accentColor = hovNode ? SPEAKER_CONFIG[hovNode.speaker].color : '#ffffff'
 
-    // Dim or highlight each node circle + label
-    nodes.forEach(n => {
-      const el = nodeMap.get(n.id)
-      const lEl = labelMap.get(n.id)
-      if (neighborIds.has(n.id)) {
-        if (el) {
-          el.style.opacity = '1'
-          el.style.filter = n.id === hoveredNodeId
-            ? `drop-shadow(0 0 10px ${accentColor}) drop-shadow(0 0 4px ${accentColor})`
-            : `drop-shadow(0 0 5px ${SPEAKER_CONFIG[n.speaker].color}99)`
-        }
-        if (lEl) lEl.style.opacity = '1'
-      } else {
-        if (el) { el.style.opacity = '0.12'; el.style.filter = '' }
-        if (lEl) lEl.style.opacity = '0'
+    // O(1): fade everything via CSS class (no per-node loop needed)
+    graphGroup?.classList.add('graph-faded')
+
+    // O(prevK): clear data-hl from nodes/links no longer highlighted
+    prevHighlightedNodeIds.current.forEach(nodeId => {
+      if (!neighborIds.has(nodeId)) {
+        const el = nodeMap.get(nodeId)
+        if (el) { el.removeAttribute('data-hl'); el.style.filter = '' }
+        const lEl = labelMap.get(nodeId)
+        if (lEl) { lEl.removeAttribute('data-hl'); lEl.style.opacity = '' }
+      }
+    })
+    prevHighlightedLinkIdxs.current.forEach(i => {
+      if (!neighborLinkIdxs.has(i)) {
+        const el = linkMap.get(i)
+        if (el) { el.removeAttribute('data-hl'); el.style.stroke = ''; el.style.strokeWidth = '' }
       }
     })
 
-    // Highlight connecting wires; dim all others
-    links.forEach((_: GraphLink, i: number) => {
-      const el = linkMap.get(i)
+    // O(k): set data-hl + glow on highlighted nodes
+    neighborIds.forEach(nodeId => {
+      const el = nodeMap.get(nodeId)
       if (!el) return
-      if (neighborLinkIdxs.has(i)) {
-        el.style.opacity = '1'
-        el.style.stroke = accentColor
-        el.style.strokeWidth = '2'
-      } else {
-        el.style.opacity = '0.04'
-        el.style.stroke = ''
-        el.style.strokeWidth = ''
-      }
+      el.setAttribute('data-hl', '1')
+      const nd = nodeDataMapRef.current.get(nodeId)
+      el.style.filter = nodeId === hoveredNodeId
+        ? `drop-shadow(0 0 10px ${accentColor}) drop-shadow(0 0 4px ${accentColor})`
+        : nd ? `drop-shadow(0 0 5px ${SPEAKER_CONFIG[nd.speaker].color}99)` : ''
+      const lEl = labelMap.get(nodeId)
+      if (lEl) { lEl.setAttribute('data-hl', '1'); lEl.style.opacity = '1' }
     })
-  }, [hoveredNodeId, nodes, links, showNodeLabels])
+    // O(k): set data-hl + accent on highlighted links
+    neighborLinkIdxs.forEach(i => {
+      const el = linkMap.get(i)
+      if (el) { el.setAttribute('data-hl', '1'); el.style.stroke = accentColor; el.style.strokeWidth = '2' }
+    })
+
+    prevHighlightedNodeIds.current = neighborIds
+    prevHighlightedLinkIdxs.current = neighborLinkIdxs
+  }, [hoveredNodeId, links, showNodeLabels])
 
   return (
     <div style={{ position: 'relative', width, height }} data-testid="graph-2d">
@@ -434,7 +457,7 @@ export default function Graph2D({ width, height }: Props) {
           {/* Nodes */}
           <g data-testid="graph-nodes">
             {nodes.map(node => {
-              const color = getNodeColor(node, nodeColorMode, nodeColorMap, colorRules)
+              const color = getNodeColor(node, nodeColorMode, nodeColorMap)
               const isSelected = selectedNodeId === node.id
               return (
                 <circle

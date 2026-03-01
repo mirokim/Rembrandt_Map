@@ -1,66 +1,84 @@
+import { useRef } from 'react'
+import { Upload } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { fieldInputStyle, fieldLabelStyle } from '../settingsShared'
 
+const uploadBtnStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  fontSize: 10,
+  padding: '2px 7px',
+  borderRadius: 4,
+  border: '1px solid var(--color-border)',
+  background: 'transparent',
+  color: 'var(--color-text-muted)',
+  cursor: 'pointer',
+  transition: 'color 0.1s',
+}
+
 export default function ProjectTab() {
   const { projectInfo, setProjectInfo } = useSettingsStore()
+  const projectFileRef = useRef<HTMLInputElement>(null)
+  const teamFileRef = useRef<HTMLInputElement>(null)
 
-  const SCALE_OPTIONS = ['Indie', 'AA', 'AAA', '모바일', '기타']
-  const FIELD_ROWS: { key: keyof typeof projectInfo; label: string; placeholder: string }[] = [
-    { key: 'name',     label: '프로젝트명',  placeholder: 'My Awesome Game' },
-    { key: 'engine',   label: '게임 엔진',   placeholder: 'Unreal Engine 5, Unity, Godot...' },
-    { key: 'genre',    label: '장르',        placeholder: 'RPG, FPS, Strategy...' },
-    { key: 'platform', label: '플랫폼',      placeholder: 'PC, Console, Mobile...' },
-    { key: 'teamSize', label: '팀 인원',     placeholder: '10명' },
-  ]
+  function handleProjectFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setProjectInfo({ rawProjectInfo: (ev.target?.result as string).trim() })
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  function handleTeamFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setProjectInfo({ teamMembers: (ev.target?.result as string).trim() })
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
 
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-          프로젝트 정보
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 14px' }}>
-          {FIELD_ROWS.map(({ key, label, placeholder }) => (
-            <div key={key}>
-              <label style={fieldLabelStyle}>{label}</label>
-              <input
-                type="text"
-                value={projectInfo[key]}
-                onChange={e => setProjectInfo({ [key]: e.target.value })}
-                placeholder={placeholder}
-                style={fieldInputStyle}
-              />
-            </div>
-          ))}
-
-          {/* 개발 규모 — dropdown */}
-          <div>
-            <label style={fieldLabelStyle}>개발 규모</label>
-            <div style={{ position: 'relative' }}>
-              <select
-                value={projectInfo.scale}
-                onChange={e => setProjectInfo({ scale: e.target.value })}
-                style={{ ...fieldInputStyle, appearance: 'none', paddingRight: 24, cursor: 'pointer' }}
-              >
-                <option value="">선택...</option>
-                {SCALE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--color-text-muted)', pointerEvents: 'none' }}>▾</span>
-            </div>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>프로젝트 정보</h3>
+          <button style={uploadBtnStyle} onClick={() => projectFileRef.current?.click()} title="프로젝트 .md 파일에서 불러오기">
+            <Upload size={10} /> MD 불러오기
+          </button>
+          <input ref={projectFileRef} type="file" accept=".md" style={{ display: 'none' }} onChange={handleProjectFile} />
         </div>
+        <textarea
+          value={projectInfo.rawProjectInfo}
+          onChange={e => setProjectInfo({ rawProjectInfo: e.target.value })}
+          placeholder={'# 프로젝트명\n\n게임 엔진, 장르, 플랫폼, 팀 규모, 개요 등\nMD 파일 내용을 그대로 붙여넣으세요.'}
+          rows={10}
+          style={{ ...fieldInputStyle, resize: 'vertical', lineHeight: 1.6 }}
+        />
+      </section>
 
-        {/* 개요 */}
-        <div style={{ marginTop: 10 }}>
-          <label style={fieldLabelStyle}>프로젝트 개요</label>
-          <textarea
-            value={projectInfo.description}
-            onChange={e => setProjectInfo({ description: e.target.value })}
-            placeholder="게임의 핵심 컨셉, 목표 유저, 차별점 등을 간략히 설명해주세요..."
-            rows={4}
-            style={{ ...fieldInputStyle, resize: 'vertical', lineHeight: 1.6 }}
-          />
+      {/* 팀원 */}
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>팀원</label>
+          <button style={uploadBtnStyle} onClick={() => teamFileRef.current?.click()} title="팀원 .md 파일에서 불러오기">
+            <Upload size={10} /> MD 불러오기
+          </button>
+          <input ref={teamFileRef} type="file" accept=".md" style={{ display: 'none' }} onChange={handleTeamFile} />
         </div>
+        <textarea
+          value={projectInfo.teamMembers}
+          onChange={e => setProjectInfo({ teamMembers: e.target.value })}
+          placeholder={'chief: 홍길동\nart: 이순신, 박민수\nplan: 김철수\nprog: 이영희'}
+          rows={4}
+          style={{ ...fieldInputStyle, resize: 'vertical', lineHeight: 1.6 }}
+        />
       </section>
     </div>
   )

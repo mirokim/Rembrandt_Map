@@ -45,6 +45,21 @@ console.error = (...args: unknown[]) => {
 // Mock scrollIntoView (not available in jsdom)
 window.HTMLElement.prototype.scrollIntoView = vi.fn()
 
+// Mock ResizeObserver — required by @tanstack/react-virtual.
+// Reports a fixed 800×600 container so the virtualizer renders items in tests.
+globalThis.ResizeObserver = class ResizeObserver {
+  private cb: ResizeObserverCallback
+  constructor(cb: ResizeObserverCallback) { this.cb = cb }
+  observe(el: Element) {
+    this.cb(
+      [{ contentRect: { width: 800, height: 600 } as DOMRectReadOnly, target: el } as ResizeObserverEntry],
+      this
+    )
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
 // Mock requestAnimationFrame
 vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
   setTimeout(() => cb(16), 16)

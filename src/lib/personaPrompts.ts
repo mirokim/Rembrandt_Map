@@ -102,19 +102,27 @@ export function buildProjectContext(
   projectInfo: ProjectInfo,
   directorBio?: string
 ): string {
-  const lines: string[] = []
-
-  if (projectInfo.name)        lines.push(`- 프로젝트명: ${projectInfo.name}`)
-  if (projectInfo.engine)      lines.push(`- 게임 엔진: ${projectInfo.engine}`)
-  if (projectInfo.genre)       lines.push(`- 장르: ${projectInfo.genre}`)
-  if (projectInfo.platform)    lines.push(`- 플랫폼: ${projectInfo.platform}`)
-  if (projectInfo.scale)       lines.push(`- 개발 규모: ${projectInfo.scale}`)
-  if (projectInfo.teamSize)    lines.push(`- 팀 인원: ${projectInfo.teamSize}`)
-  if (projectInfo.description) lines.push(`- 프로젝트 개요: ${projectInfo.description}`)
-
   const parts: string[] = []
-  if (lines.length > 0) {
-    parts.push(`## 현재 프로젝트 정보\n${lines.join('\n')}`)
+
+  if (projectInfo.rawProjectInfo?.trim()) {
+    parts.push(`## 현재 프로젝트 정보\n${projectInfo.rawProjectInfo.trim()}`)
+  } else {
+    // Fallback: build from individual fields (backward compat for old data)
+    const lines: string[] = []
+    if (projectInfo.name)        lines.push(`- 프로젝트명: ${projectInfo.name}`)
+    if (projectInfo.engine)      lines.push(`- 게임 엔진: ${projectInfo.engine}`)
+    if (projectInfo.genre)       lines.push(`- 장르: ${projectInfo.genre}`)
+    if (projectInfo.platform)    lines.push(`- 플랫폼: ${projectInfo.platform}`)
+    if (projectInfo.scale)       lines.push(`- 개발 규모: ${projectInfo.scale}`)
+    if (projectInfo.teamSize)    lines.push(`- 팀 인원: ${projectInfo.teamSize}`)
+    if (projectInfo.description) lines.push(`- 프로젝트 개요: ${projectInfo.description}`)
+    if (lines.length > 0) {
+      parts.push(`## 현재 프로젝트 정보\n${lines.join('\n')}`)
+    }
+  }
+
+  if (projectInfo.teamMembers?.trim()) {
+    parts.push(`## 팀 구성\n${projectInfo.teamMembers.trim()}`)
   }
   if (directorBio?.trim()) {
     parts.push(`## 나의 역할 및 특성\n${directorBio.trim()}`)

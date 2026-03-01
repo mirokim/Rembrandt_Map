@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, BarChart2, Clock, Download, Trash2,
   Settings, Cpu, GitMerge, Keyboard, Info,
-  Layers, Palette, FileCode,
+  Layers, FileCode,
   Users, Tag,
 } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -22,7 +22,6 @@ import AITab from './tabs/AITab'
 import PersonasTab from './tabs/PersonasTab'
 import DebateTab from './tabs/DebateTab'
 import ProjectTab from './tabs/ProjectTab'
-import ColorsTab from './tabs/ColorsTab'
 import AboutTab from './tabs/AboutTab'
 import TagsTab from './tabs/TagsTab'
 
@@ -30,7 +29,7 @@ import TagsTab from './tabs/TagsTab'
 
 type SettingsTab =
   | 'stats' | 'timeline' | 'export' | 'trash' | 'converter'
-  | 'general' | 'ai' | 'personas' | 'debate' | 'shortcuts' | 'project' | 'colors' | 'tags'
+  | 'general' | 'ai' | 'personas' | 'debate' | 'shortcuts' | 'project' | 'tags'
   | 'about'
 
 type NavItem = { id: SettingsTab; icon: React.ElementType; label: string }
@@ -57,7 +56,6 @@ const NAV: NavGroup[] = [
       { id: 'tags',      icon: Tag,       label: '태그' },
       { id: 'personas',  icon: Users,     label: '페르소나' },
       { id: 'project',   icon: Layers,    label: '프로젝트' },
-      { id: 'colors',    icon: Palette,   label: '색상 규칙' },
       { id: 'debate',    icon: GitMerge,  label: '토론' },
       { id: 'shortcuts', icon: Keyboard,  label: '단축키' },
     ],
@@ -91,7 +89,6 @@ function renderTabContent(tab: SettingsTab) {
     case 'ai':        return <AITab />
     case 'personas':  return <PersonasTab />
     case 'project':   return <ProjectTab />
-    case 'colors':    return <ColorsTab />
     case 'debate':    return <DebateTab />
     case 'tags':      return <TagsTab />
     case 'about':     return <AboutTab />

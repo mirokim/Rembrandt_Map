@@ -142,3 +142,31 @@ describe('settingsStore — paragraphRenderQuality', () => {
     expect(useSettingsStore.getState().settingsPanelOpen).toBe(false)
   })
 })
+
+describe('settingsStore — showNodeLabels / toggleNodeLabels', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ showNodeLabels: false })
+  })
+
+  it('defaults to false', () => {
+    expect(useSettingsStore.getState().showNodeLabels).toBe(false)
+  })
+
+  it('toggleNodeLabels flips to true', () => {
+    useSettingsStore.getState().toggleNodeLabels()
+    expect(useSettingsStore.getState().showNodeLabels).toBe(true)
+  })
+
+  it('toggleNodeLabels flips back to false', () => {
+    useSettingsStore.getState().toggleNodeLabels()
+    useSettingsStore.getState().toggleNodeLabels()
+    expect(useSettingsStore.getState().showNodeLabels).toBe(false)
+  })
+
+  it('toggling does not affect paragraphRenderQuality', () => {
+    useSettingsStore.getState().setParagraphRenderQuality('high')
+    useSettingsStore.getState().toggleNodeLabels()
+    expect(useSettingsStore.getState().paragraphRenderQuality).toBe('high')
+    expect(useSettingsStore.getState().showNodeLabels).toBe(true)
+  })
+})

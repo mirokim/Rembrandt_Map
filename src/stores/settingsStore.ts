@@ -18,6 +18,10 @@ export interface ProjectInfo {
   scale: string
   teamSize: string
   description: string
+  /** Team members in plain-text format: "art: 홍길동, 이순신\nchief: 김철수" */
+  teamMembers: string
+  /** Raw project info as pasted/uploaded MD content (replaces individual fields in UI) */
+  rawProjectInfo: string
 }
 
 export const DEFAULT_PROJECT_INFO: ProjectInfo = {
@@ -28,12 +32,8 @@ export const DEFAULT_PROJECT_INFO: ProjectInfo = {
   scale: '',
   teamSize: '',
   description: '',
-}
-
-export interface ColorRule {
-  id: string
-  keyword: string
-  color: string
+  teamMembers: '',
+  rawProjectInfo: '',
 }
 
 export interface CustomPersona {
@@ -59,8 +59,6 @@ interface SettingsState {
   projectInfo: ProjectInfo
   /** Per-director custom persona descriptions */
   directorBios: Partial<Record<DirectorId, string>>
-  /** Keyword-based node color rules */
-  colorRules: ColorRule[]
   /** User-defined additional personas */
   customPersonas: CustomPersona[]
   /** System prompt overrides for built-in director personas */
@@ -71,6 +69,8 @@ interface SettingsState {
   editorDefaultLocked: boolean
   /** Paragraph rendering quality: high = full markdown+wikilinks, medium = markdown only, fast = plain text */
   paragraphRenderQuality: ParagraphRenderQuality
+  /** Whether node labels are visible in the graph */
+  showNodeLabels: boolean
   /** Allowed tag names for AI tag suggestion */
   tagPresets: string[]
   /** User-assigned hex colors per tag name (overrides auto-palette in graph) */
@@ -86,9 +86,6 @@ interface SettingsState {
   setTheme: (theme: AppTheme) => void
   setProjectInfo: (info: Partial<ProjectInfo>) => void
   setDirectorBio: (director: DirectorId, bio: string) => void
-  addColorRule: (rule: ColorRule) => void
-  updateColorRule: (id: string, updates: Partial<Omit<ColorRule, 'id'>>) => void
-  removeColorRule: (id: string) => void
   addPersona: (persona: CustomPersona) => void
   updatePersona: (id: string, updates: Partial<Omit<CustomPersona, 'id'>>) => void
   removePersona: (id: string) => void
@@ -101,6 +98,7 @@ interface SettingsState {
   resetVaultPersonas: () => void
   setEditorDefaultLocked: (locked: boolean) => void
   setParagraphRenderQuality: (q: ParagraphRenderQuality) => void
+  toggleNodeLabels: () => void
   addTagPreset: (tag: string) => void
   removeTagPreset: (tag: string) => void
   setTagColor: (tag: string, color: string) => void
@@ -143,12 +141,12 @@ export const useSettingsStore = create<SettingsState>()(
       theme: 'dark' as AppTheme,
       projectInfo: { ...DEFAULT_PROJECT_INFO },
       directorBios: {},
-      colorRules: [],
       customPersonas: [],
       personaPromptOverrides: {},
       disabledPersonaIds: [],
       editorDefaultLocked: false,
       paragraphRenderQuality: 'fast' as ParagraphRenderQuality,
+      showNodeLabels: false,
       tagPresets: [],
       tagColors: {},
       folderColors: {},
@@ -178,17 +176,6 @@ export const useSettingsStore = create<SettingsState>()(
 
       setDirectorBio: (director, bio) =>
         set((state) => ({ directorBios: { ...state.directorBios, [director]: bio } })),
-
-      addColorRule: (rule) =>
-        set((state) => ({ colorRules: [...state.colorRules, rule] })),
-
-      updateColorRule: (id, updates) =>
-        set((state) => ({
-          colorRules: state.colorRules.map(r => r.id === id ? { ...r, ...updates } : r),
-        })),
-
-      removeColorRule: (id) =>
-        set((state) => ({ colorRules: state.colorRules.filter(r => r.id !== id) })),
 
       addPersona: (persona) =>
         set((state) => ({ customPersonas: [...state.customPersonas, persona] })),
@@ -245,6 +232,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       setParagraphRenderQuality: (paragraphRenderQuality) => set({ paragraphRenderQuality }),
 
+      toggleNodeLabels: () => set((s) => ({ showNodeLabels: !s.showNodeLabels })),
+
       addTagPreset: (tag) =>
         set((s) => ({
           tagPresets: s.tagPresets.includes(tag) ? s.tagPresets : [...s.tagPresets, tag],
@@ -270,12 +259,12 @@ export const useSettingsStore = create<SettingsState>()(
         theme: state.theme,
         projectInfo: state.projectInfo,
         directorBios: state.directorBios,
-        colorRules: state.colorRules,
         customPersonas: state.customPersonas,
         personaPromptOverrides: state.personaPromptOverrides,
         disabledPersonaIds: state.disabledPersonaIds,
         editorDefaultLocked: state.editorDefaultLocked,
         paragraphRenderQuality: state.paragraphRenderQuality,
+        showNodeLabels: state.showNodeLabels,
         tagPresets: state.tagPresets,
         tagColors: state.tagColors,
         folderColors: state.folderColors,

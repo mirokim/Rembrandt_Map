@@ -64,11 +64,17 @@ export default function Graph3D({ width, height }: Props) {
   const lastHoveredRef = useRef<string | null>(null)
   // Adjacency map: nodeId → Set<linkIndex>
   const adjacencyRef = useRef<Map<string, Set<number>>>(new Map())
+  // Raycasting throttle: queue one RAF per frame, skip intermediate mousemove events
+  const rafScheduledRef = useRef(false)
+  const pendingMousePosRef = useRef<{ x: number; y: number } | null>(null)
+  // Previous hover state for delta-only neighbor updates (O(k) instead of O(n+e))
+  interface HoverState { neighborIds: Set<string>; neighborLinkIdxs: Set<number> }
+  const prevHoverStateRef = useRef<HoverState | null>(null)
 
   const { nodes, links, selectedNodeId, hoveredNodeId, setSelectedNode, setHoveredNode, setNodes, setLinks, physics, aiHighlightNodeIds } = useGraphStore()
-  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor, showNodeLabels } = useUIStore()
+  const { setSelectedDoc, setCenterTab, centerTab, nodeColorMode, openInEditor } = useUIStore()
   const { vaultPath, loadedDocuments, setLoadedDocuments } = useVaultStore()
-  const colorRules = useSettingsStore(s => s.colorRules)
+  const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
   const tagColors = useSettingsStore(s => s.tagColors)
   const folderColors = useSettingsStore(s => s.folderColors)
 
@@ -91,7 +97,7 @@ export default function Graph3D({ width, height }: Props) {
       const mesh = meshMap.get(node.id)
       if (mesh) {
         const mat = mesh.material as THREE.MeshBasicMaterial
-        mat.color.set(getNodeColor(node, nodeColorMode, nodeColorMap, colorRules))
+        mat.color.set(getNodeColor(node, nodeColorMode, nodeColorMap))
       }
     })
   }, [nodes, nodeColorMode, nodeColorMap])
@@ -200,7 +206,7 @@ export default function Graph3D({ width, height }: Props) {
     // ── Nodes ────────────────────────────────────────────────────────────────
     const geo = new THREE.SphereGeometry(NODE_RADIUS, 16, 12)
     nodes.forEach(node => {
-      const color = getNodeColor(node, nodeColorMode, nodeColorMap, colorRules)
+      const color = getNodeColor(node, nodeColorMode, nodeColorMap)
       // transparent: true so we can dim opacity for non-neighbors
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 })
       const mesh = new THREE.Mesh(geo, mat)
@@ -218,7 +224,7 @@ export default function Graph3D({ width, height }: Props) {
       labelDiv.style.pointerEvents = 'none'
       labelDiv.style.whiteSpace = 'nowrap'
       labelDiv.style.textShadow = '0 0 6px #000, 0 0 4px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000'
-      labelDiv.style.opacity = useUIStore.getState().showNodeLabels ? '0.95' : '0'
+      labelDiv.style.opacity = useSettingsStore.getState().showNodeLabels ? '0.95' : '0'
       labelDiv.style.userSelect = 'none'
       labelDiv.style.letterSpacing = '0.01em'
       const labelObj = new CSS2DObject(labelDiv)
@@ -342,6 +348,7 @@ export default function Graph3D({ width, height }: Props) {
     return () => {
       graphCallbacks.resetCamera = null
       cancelAnimationFrame(rafRef.current)
+      prevHoverStateRef.current = null
       controls.removeEventListener('start', onInteractStart)
       controls.dispose()
       renderer.dispose()
@@ -446,76 +453,118 @@ export default function Graph3D({ width, height }: Props) {
     }
   }, [aiHighlightNodeIds])
 
-  // ── Neighbor highlight when hoveredNodeId changes ─────────────────────────
+  // ── Neighbor highlight — delta updates: O(k) for hover→hover, O(n+e) for enter/exit null
   useEffect(() => {
     const meshMap = nodeMeshesRef.current
     const colorArray = lineColorArrayRef.current
     const colorAttr = lineColorAttrRef.current
 
     if (!hoveredNodeId) {
-      // Reset all nodes to full opacity
-      nodes.forEach(n => {
-        const mesh = meshMap.get(n.id)
-        if (mesh) (mesh.material as THREE.MeshBasicMaterial).opacity = 1.0
-      })
-      // Reset all edge colors to default
-      if (colorArray) {
-        for (let v = 0; v < links.length * 2; v++) {
-          colorArray[v * 3 + 0] = EDGE_DEF_R
-          colorArray[v * 3 + 1] = EDGE_DEF_G
-          colorArray[v * 3 + 2] = EDGE_DEF_B
+      const prev = prevHoverStateRef.current
+      if (prev) {
+        // Restore neighbor nodes → full opacity (O(prevK))
+        prev.neighborIds.forEach(nodeId => {
+          const mesh = meshMap.get(nodeId)
+          if (mesh) (mesh.material as THREE.MeshBasicMaterial).opacity = 1.0
+        })
+        // Restore previously-dimmed nodes → full opacity (O(n - prevK))
+        // We must reset all nodes because we don't track which were dimmed
+        nodes.forEach(n => {
+          if (!prev.neighborIds.has(n.id)) {
+            const mesh = meshMap.get(n.id)
+            if (mesh) (mesh.material as THREE.MeshBasicMaterial).opacity = 1.0
+          }
+        })
+        // Reset only previously-highlighted link colors → default (O(prevK_links))
+        if (colorArray && colorAttr) {
+          prev.neighborLinkIdxs.forEach(i => {
+            for (let v = 0; v < 2; v++) {
+              const base = i * 6 + v * 3
+              colorArray[base] = EDGE_DEF_R; colorArray[base + 1] = EDGE_DEF_G; colorArray[base + 2] = EDGE_DEF_B
+            }
+          })
+          colorAttr.needsUpdate = true
         }
-        if (colorAttr) colorAttr.needsUpdate = true
       }
+      prevHoverStateRef.current = null
       return
     }
 
-    // Collect neighboring link indices and node IDs
+    // Resolve neighbor sets (O(k_links))
     const neighborLinkIdxs = adjacencyRef.current.get(hoveredNodeId) ?? new Set<number>()
     const neighborIds = new Set<string>([hoveredNodeId])
-    links.forEach((link: GraphLink, i: number) => {
-      if (neighborLinkIdxs.has(i)) {
-        const src = typeof link.source === 'string' ? link.source : (link.source as { id: string }).id
-        const tgt = typeof link.target === 'string' ? link.target : (link.target as { id: string }).id
-        neighborIds.add(src)
-        neighborIds.add(tgt)
-      }
+    neighborLinkIdxs.forEach(i => {
+      const link = links[i] as GraphLink | undefined
+      if (!link) return
+      neighborIds.add(typeof link.source === 'string' ? link.source : (link.source as { id: string }).id)
+      neighborIds.add(typeof link.target === 'string' ? link.target : (link.target as { id: string }).id)
     })
 
-    // Use hovered node's speaker color as accent
     const hovNode = nodes.find(n => n.id === hoveredNodeId)
     const accentHex = hovNode ? SPEAKER_CONFIG[hovNode.speaker].hex : 0xffffff
     const accentR = ((accentHex >> 16) & 0xff) / 0xff
     const accentG = ((accentHex >> 8) & 0xff) / 0xff
     const accentB = (accentHex & 0xff) / 0xff
 
-    // Dim non-neighbor nodes; keep neighbors fully opaque
-    nodes.forEach(n => {
-      const mesh = meshMap.get(n.id)
-      if (!mesh) return
-      ;(mesh.material as THREE.MeshBasicMaterial).opacity = neighborIds.has(n.id) ? 1.0 : 0.1
-    })
+    const prev = prevHoverStateRef.current
 
-    // Update edge vertex colors: neighbor → accent, others → very dark
-    if (colorArray && colorAttr) {
-      links.forEach((_: GraphLink, i: number) => {
-        const isNeighbor = neighborLinkIdxs.has(i)
-        // Each edge = 2 vertices in LineSegments; layout: vertex (2*i+v), offset (i*6 + v*3)
-        for (let v = 0; v < 2; v++) {
-          const base = i * 6 + v * 3
-          if (isNeighbor) {
-            colorArray[base + 0] = accentR
-            colorArray[base + 1] = accentG
-            colorArray[base + 2] = accentB
-          } else {
-            colorArray[base + 0] = 0.04
-            colorArray[base + 1] = 0.04
-            colorArray[base + 2] = 0.04
-          }
+    if (prev) {
+      // Delta update: hover moved from one node to another (O(prevK + newK))
+      // Nodes leaving highlight → dim
+      prev.neighborIds.forEach(nodeId => {
+        if (!neighborIds.has(nodeId)) {
+          const mesh = meshMap.get(nodeId)
+          if (mesh) (mesh.material as THREE.MeshBasicMaterial).opacity = 0.1
         }
       })
-      colorAttr.needsUpdate = true
+      // Nodes entering highlight → brighten
+      neighborIds.forEach(nodeId => {
+        if (!prev.neighborIds.has(nodeId)) {
+          const mesh = meshMap.get(nodeId)
+          if (mesh) (mesh.material as THREE.MeshBasicMaterial).opacity = 1.0
+        }
+      })
+      // Links: reset previously-highlighted, set newly-highlighted
+      if (colorArray && colorAttr) {
+        prev.neighborLinkIdxs.forEach(i => {
+          if (!neighborLinkIdxs.has(i)) {
+            for (let v = 0; v < 2; v++) {
+              const base = i * 6 + v * 3
+              colorArray[base] = 0.04; colorArray[base + 1] = 0.04; colorArray[base + 2] = 0.04
+            }
+          }
+        })
+        neighborLinkIdxs.forEach(i => {
+          if (!prev.neighborLinkIdxs.has(i)) {
+            for (let v = 0; v < 2; v++) {
+              const base = i * 6 + v * 3
+              colorArray[base] = accentR; colorArray[base + 1] = accentG; colorArray[base + 2] = accentB
+            }
+          }
+        })
+        colorAttr.needsUpdate = true
+      }
+    } else {
+      // Initial hover: full pass unavoidable (O(n+e))
+      nodes.forEach(n => {
+        const mesh = meshMap.get(n.id)
+        if (!mesh) return
+        ;(mesh.material as THREE.MeshBasicMaterial).opacity = neighborIds.has(n.id) ? 1.0 : 0.1
+      })
+      if (colorArray && colorAttr) {
+        links.forEach((_: GraphLink, i: number) => {
+          const isNeighbor = neighborLinkIdxs.has(i)
+          for (let v = 0; v < 2; v++) {
+            const base = i * 6 + v * 3
+            if (isNeighbor) { colorArray[base] = accentR; colorArray[base + 1] = accentG; colorArray[base + 2] = accentB }
+            else { colorArray[base] = 0.04; colorArray[base + 1] = 0.04; colorArray[base + 2] = 0.04 }
+          }
+        })
+        colorAttr.needsUpdate = true
+      }
     }
+
+    prevHoverStateRef.current = { neighborIds, neighborLinkIdxs }
   }, [hoveredNodeId, nodes, links])
 
   // ── Helper: screen coords → NDC (Normalized Device Coordinates) ───────────
@@ -594,47 +643,52 @@ export default function Graph3D({ width, height }: Props) {
     setTooltip({ nodeId, x: e.clientX, y: e.clientY })
   }, [getNDC, simNodesRef, simRef, setHoveredNode])
 
-  // ── Mouse move: update drag position OR detect hover ─────────────────────
+  // ── Mouse move: update drag position OR detect hover (raycasting throttled to 1/frame)
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const renderer = rendererRef.current
     const camera = cameraRef.current
     if (!renderer || !camera) return
 
-    const ndc = getNDC(e.clientX, e.clientY)
-    raycasterRef.current.setFromCamera(ndc, camera)
-
     if (draggingNodeIdRef.current) {
-      // Move dragged node: intersect ray with drag plane
+      // Drag: process immediately (no throttle needed — already limited by mouse events)
       isDraggingRef.current = true
+      const ndc = getNDC(e.clientX, e.clientY)
+      raycasterRef.current.setFromCamera(ndc, camera)
       const intersection = new THREE.Vector3()
       if (raycasterRef.current.ray.intersectPlane(dragPlaneRef.current, intersection)) {
         const simNode = simNodesRef.current.find(n => n.id === draggingNodeIdRef.current)
         if (simNode) {
-          simNode.fx = intersection.x
-          simNode.fy = intersection.y
-          simNode.fz = intersection.z
+          simNode.fx = intersection.x; simNode.fy = intersection.y; simNode.fz = intersection.z
           ;(simRef.current as any)?.alphaTarget(0.3).restart()
         }
       }
-      // Update tooltip position
       setTooltip({ nodeId: draggingNodeIdRef.current, x: e.clientX, y: e.clientY })
       return
     }
 
-    // Hover detection via raycasting (not dragging)
-    const meshes = Array.from(nodeMeshesRef.current.values())
-    const hits = raycasterRef.current.intersectObjects(meshes)
-    const newHoverId = hits.length > 0
-      ? (hits[0].object as THREE.Mesh).userData.nodeId as string
-      : null
-
-    if (newHoverId !== lastHoveredRef.current) {
-      lastHoveredRef.current = newHoverId
-      setHoveredNode(newHoverId)
-      setTooltip(newHoverId ? { nodeId: newHoverId, x: e.clientX, y: e.clientY } : null)
-    } else if (newHoverId) {
-      // Same node but update position
-      setTooltip({ nodeId: newHoverId, x: e.clientX, y: e.clientY })
+    // Throttle hover raycasting to one per animation frame
+    pendingMousePosRef.current = { x: e.clientX, y: e.clientY }
+    if (!rafScheduledRef.current) {
+      rafScheduledRef.current = true
+      requestAnimationFrame(() => {
+        rafScheduledRef.current = false
+        const pos = pendingMousePosRef.current
+        if (!pos || !rendererRef.current || !cameraRef.current) return
+        const ndc = getNDC(pos.x, pos.y)
+        raycasterRef.current.setFromCamera(ndc, cameraRef.current)
+        const meshes = Array.from(nodeMeshesRef.current.values())
+        const hits = raycasterRef.current.intersectObjects(meshes)
+        const newHoverId = hits.length > 0
+          ? (hits[0].object as THREE.Mesh).userData.nodeId as string
+          : null
+        if (newHoverId !== lastHoveredRef.current) {
+          lastHoveredRef.current = newHoverId
+          setHoveredNode(newHoverId)
+          setTooltip(newHoverId ? { nodeId: newHoverId, x: pos.x, y: pos.y } : null)
+        } else if (newHoverId) {
+          setTooltip({ nodeId: newHoverId, x: pos.x, y: pos.y })
+        }
+      })
     }
   }, [getNDC, simNodesRef, simRef, setHoveredNode])
 

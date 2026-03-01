@@ -15,7 +15,7 @@ const PARAGRAPH_QUALITIES: { id: ParagraphRenderQuality; label: string; desc: st
 ]
 
 export default function GeneralTab() {
-  const { theme, setTheme, editorDefaultLocked, setEditorDefaultLocked, paragraphRenderQuality, setParagraphRenderQuality } = useSettingsStore()
+  const { theme, setTheme, editorDefaultLocked, setEditorDefaultLocked, paragraphRenderQuality, setParagraphRenderQuality, showNodeLabels, toggleNodeLabels } = useSettingsStore()
 
   return (
     <div className="flex flex-col gap-7">
@@ -95,6 +95,34 @@ export default function GeneralTab() {
             <span
               className="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform"
               style={{ transform: editorDefaultLocked ? 'translateX(18px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </div>
+      </section>
+
+      {/* 그래프 */}
+      <section>
+        <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>그래프</h3>
+        <div
+          className="flex items-center justify-between px-3 py-2.5 rounded-lg"
+          style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}
+        >
+          <div>
+            <div className="text-xs" style={{ color: 'var(--color-text-primary)' }}>노드 라벨 표시</div>
+            <div className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+              그래프에서 노드 이름 항상 표시
+            </div>
+          </div>
+          <button
+            role="switch"
+            aria-checked={showNodeLabels}
+            onClick={toggleNodeLabels}
+            className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+            style={{ background: showNodeLabels ? 'var(--color-accent)' : 'var(--color-border)' }}
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform"
+              style={{ transform: showNodeLabels ? 'translateX(18px)' : 'translateX(2px)' }}
             />
           </button>
         </div>

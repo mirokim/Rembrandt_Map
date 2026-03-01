@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronLeft, FileText, AlertTriangle, ArrowUp, ArrowDown } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
@@ -21,10 +23,26 @@ const SPEAKER_PRIORITY: Record<SpeakerId, number> = {
 export default function DocViewer() {
   const { selectedDocId, setCenterTab } = useUIStore()
   const { vaultPath, loadedDocuments } = useVaultStore()
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   // Mock fallback: if no vault loaded, use MOCK_DOCUMENTS
   const allDocuments = (vaultPath && loadedDocuments) ? loadedDocuments : MOCK_DOCUMENTS
   const doc = allDocuments.find(d => d.id === selectedDocId)
+
+  // Virtualize only when there are enough sections to benefit.
+  // Below the threshold we render directly, which keeps tests simple and avoids
+  // ResizeObserver measurement overhead for small documents.
+  const VIRTUALIZE_THRESHOLD = 15
+  const sectionCount = doc?.sections.length ?? 0
+  const shouldVirtualize = sectionCount >= VIRTUALIZE_THRESHOLD
+
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? sectionCount : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 120,
+    overscan: 4,
+    initialRect: { width: 0, height: 2000 },
+  })
 
   return (
     <div className="flex flex-col h-full">
@@ -116,11 +134,27 @@ export default function DocViewer() {
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto px-6 py-5" data-testid="doc-content">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5" data-testid="doc-content">
               <FrontmatterBlock doc={doc} />
-              {doc.sections.map(section => (
-                <ParagraphBlock key={section.id} section={section} speaker={doc.speaker} />
-              ))}
+              {/* Sections list — virtualized for large documents, direct render for small ones */}
+              {shouldVirtualize ? (
+                <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+                  {virtualizer.getVirtualItems().map(vItem => (
+                    <div
+                      key={vItem.key}
+                      data-index={vItem.index}
+                      ref={virtualizer.measureElement}
+                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vItem.start}px)` }}
+                    >
+                      <ParagraphBlock section={doc.sections[vItem.index]} speaker={doc.speaker} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                doc.sections.map(section => (
+                  <ParagraphBlock key={section.id} section={section} speaker={doc.speaker} />
+                ))
+              )}
 
               {/* Conflict / priority reference */}
               {(() => {

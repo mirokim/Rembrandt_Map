@@ -2,18 +2,13 @@
  * nodeColors.ts
  *
  * Automatic color palette assignment for graph nodes.
- * Supports four modes:
- *   - 'speaker'  : use SPEAKER_CONFIG colors (existing behavior)
- *   - 'folder'   : auto-assign colors by folder path
- *   - 'tag'      : auto-assign colors by first tag
- *   - 'topic'    : auto-assign colors by first meaningful word in section heading
+ * Supports modes: speaker, document, auto, folder, tag, topic
  *
  * Obsidian-compatible: palette is deterministic for consistent colors
  * across sessions (same folder/tag/topic always gets the same color).
  */
 
 import type { GraphNode, NodeColorMode } from '@/types'
-import type { ColorRule } from '@/stores/settingsStore'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
 
 // Visually distinct palette (HSL-spaced, dark-theme friendly)
@@ -114,17 +109,7 @@ export function getNodeColor(
   node: GraphNode,
   mode: NodeColorMode,
   colorMap: Map<string, string>,
-  colorRules?: ColorRule[]
 ): string {
-  if (mode === 'rules') {
-    if (!colorRules || colorRules.length === 0) return '#666'
-    const searchText = (node.label + ' ' + (node.tags ?? []).join(' ')).toLowerCase()
-    for (const rule of colorRules) {
-      const kw = rule.keyword.toLowerCase().trim()
-      if (kw && searchText.includes(kw)) return rule.color
-    }
-    return '#666'
-  }
   if (mode === 'document') {
     return colorMap.get(node.docId) ?? speakerHex(node)
   }
@@ -216,6 +201,5 @@ export function buildNodeColorMap(
     const topics = nodes.map(n => extractTopic(n.label))
     return buildColorMap(topics)
   }
-  // 'rules' mode — colorMap not used; colors resolved per-node in getNodeColor
   return new Map()
 }

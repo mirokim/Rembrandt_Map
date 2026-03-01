@@ -16,9 +16,6 @@ interface UIState {
   leftPanelCollapsed: boolean
   /** Whether the right (chat) panel is collapsed */
   rightPanelCollapsed: boolean
-  /** Whether node labels are visible in the graph */
-  showNodeLabels: boolean
-
   setAppState: (s: AppState) => void
   setCenterTab: (t: CenterTab) => void
   setSelectedDoc: (id: string | null) => void
@@ -32,7 +29,6 @@ interface UIState {
   closeEditor: () => void
   toggleLeftPanel: () => void
   toggleRightPanel: () => void
-  toggleNodeLabels: () => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -48,7 +44,6 @@ export const useUIStore = create<UIState>()(
       editingDocId: null,
       leftPanelCollapsed: false,
       rightPanelCollapsed: false,
-      showNodeLabels: false,
 
       setAppState: (appState) => set({ appState }),
       setCenterTab: (centerTab) => set({ centerTab }),
@@ -61,7 +56,6 @@ export const useUIStore = create<UIState>()(
       closeEditor: () => set({ editingDocId: null, centerTab: 'graph' }),
       toggleLeftPanel: () => set(s => ({ leftPanelCollapsed: !s.leftPanelCollapsed })),
       toggleRightPanel: () => set(s => ({ rightPanelCollapsed: !s.rightPanelCollapsed })),
-      toggleNodeLabels: () => set(s => ({ showNodeLabels: !s.showNodeLabels })),
     }),
     {
       name: 'rembrandt-ui',
