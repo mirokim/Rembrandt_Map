@@ -22,7 +22,7 @@ import { buildAdjacencyMap } from '@/lib/graphRAG'
 import { buildFingerprint, loadTfIdfCache, saveTfIdfCache } from '@/lib/tfidfCache'
 
 export function useVaultLoader() {
-  const { vaultPath, setLoadedDocuments, setVaultFolders, setImagePathRegistry, setIsLoading, setVaultReady, setLoadingProgress, setError } =
+  const { vaultPath, setLoadedDocuments, setVaultFolders, setImagePathRegistry, addImageDataCache, clearImageDataCache, setIsLoading, setVaultReady, setLoadingProgress, setError } =
     useVaultStore()
   const { setNodes, setLinks, resetToMock } = useGraphStore()
   const { setIndexing, setChunkCount, setError: setBackendError } = useBackendStore()
@@ -125,6 +125,40 @@ export function useVaultLoader() {
             // Backend not running — silently skip indexing
           }
         }
+        // 이미지 사전 인덱싱 — 로딩 완료 후 백그라운드로 실행 (UI 블로킹 없음)
+        if (window.vaultAPI) {
+          void (async () => {
+            const registry = useVaultStore.getState().imagePathRegistry
+            if (!registry) return
+            // 모든 문서의 imageRefs 수집 (중복 제거)
+            const refsToPreload = [...new Set(
+              docs.flatMap(d => d.imageRefs ?? []).filter(ref => !!registry[ref])
+            )]
+            if (refsToPreload.length === 0) return
+            clearImageDataCache()
+            logger.debug(`[vault] 이미지 사전 인덱싱 시작: ${refsToPreload.length}개`)
+            // 10개씩 배치 병렬 처리
+            const BATCH = 10
+            for (let i = 0; i < refsToPreload.length; i += BATCH) {
+              const batch = refsToPreload.slice(i, i + BATCH)
+              const results = await Promise.allSettled(
+                batch.map(async (ref) => {
+                  const entry = registry[ref]
+                  const dataUrl = await window.vaultAPI!.readImage(entry.absolutePath)
+                  return { ref, dataUrl }
+                })
+              )
+              const batchEntries: Record<string, string> = {}
+              for (const r of results) {
+                if (r.status === 'fulfilled' && r.value.dataUrl) {
+                  batchEntries[r.value.ref] = r.value.dataUrl
+                }
+              }
+              if (Object.keys(batchEntries).length > 0) addImageDataCache(batchEntries)
+            }
+            logger.debug('[vault] 이미지 사전 인덱싱 완료')
+          })()
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '파일 로드 실패'
         logger.error('[vault] 로드 실패:', msg)
@@ -137,7 +171,8 @@ export function useVaultLoader() {
         setIsLoading(false)
       }
     },
-    [setLoadedDocuments, setVaultFolders, setImagePathRegistry, setIsLoading, setVaultReady, setLoadingProgress, setError,
+    [setLoadedDocuments, setVaultFolders, setImagePathRegistry, addImageDataCache, clearImageDataCache,
+     setIsLoading, setVaultReady, setLoadingProgress, setError,
      setNodes, setLinks, resetToMock, setIndexing, setChunkCount, setBackendError,
      loadVaultPersonas, resetVaultPersonas]
   )

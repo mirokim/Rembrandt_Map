@@ -71,6 +71,7 @@ export default function ChatInput({ debateMode, onToggleDebate }: ChatInputProps
   const selectedNodeId = useGraphStore(s => s.selectedNodeId)
   const loadedDocuments = useVaultStore(s => s.loadedDocuments)
   const imagePathRegistry = useVaultStore(s => s.imagePathRegistry)
+  const imageDataCache = useVaultStore(s => s.imageDataCache)
 
   const selectedDocImageRefs = useMemo(() => {
     if (!selectedNodeId || !loadedDocuments || !imagePathRegistry) return []
@@ -86,14 +87,18 @@ export default function ChatInput({ debateMode, onToggleDebate }: ChatInputProps
     if (!canSend) return
     const currentText = text.trim()
 
-    // 볼트 이미지 자동 로드 (선택된 문서에 ![[...]] 이미지 refs가 있을 때)
+    // 볼트 이미지 자동 로드 (캐시 우선, 미스 시 IPC 폴백)
     const autoAttachments: Attachment[] = []
-    if (selectedDocImageRefs.length > 0 && window.vaultAPI?.readImage) {
+    if (selectedDocImageRefs.length > 0) {
       for (const ref of selectedDocImageRefs) {
-        const entry = imagePathRegistry?.[ref]
-        if (!entry) continue
         try {
-          const dataUrl = await window.vaultAPI.readImage(entry.absolutePath)
+          // 1. 사전 인덱싱된 캐시에서 즉시 조회
+          let dataUrl = imageDataCache[ref]
+          // 2. 캐시 미스: IPC로 on-demand 로드
+          if (!dataUrl && window.vaultAPI?.readImage) {
+            const entry = imagePathRegistry?.[ref]
+            if (entry) dataUrl = (await window.vaultAPI.readImage(entry.absolutePath)) ?? ''
+          }
           if (!dataUrl) continue
           const mimeType = dataUrl.split(';')[0]?.split(':')[1] ?? 'image/png'
           autoAttachments.push({

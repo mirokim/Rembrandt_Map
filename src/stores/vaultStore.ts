@@ -25,6 +25,8 @@ interface VaultState {
   vaultFolders: string[]
   /** Runtime: image filename → path lookup table (from vault load) */
   imagePathRegistry: ImagePathRegistry | null
+  /** Runtime: 사전 인덱싱된 이미지 데이터 캐시: filename → base64 dataUrl */
+  imageDataCache: Record<string, string>
   /** Runtime: true while loading/parsing files */
   isLoading: boolean
   /** Runtime: true after the first load attempt completes (success or failure) */
@@ -40,6 +42,8 @@ interface VaultState {
   setLoadedDocuments: (docs: LoadedDocument[] | null) => void
   setVaultFolders: (folders: string[]) => void
   setImagePathRegistry: (registry: ImagePathRegistry | null) => void
+  addImageDataCache: (entries: Record<string, string>) => void
+  clearImageDataCache: () => void
   setIsLoading: (loading: boolean) => void
   setVaultReady: (ready: boolean) => void
   setLoadingProgress: (progress: number, phase?: string) => void
@@ -55,6 +59,7 @@ export const useVaultStore = create<VaultState>()(
       loadedDocuments: null,
       vaultFolders: [],
       imagePathRegistry: null,
+      imageDataCache: {},
       isLoading: false,
       vaultReady: false,
       loadingProgress: 0,
@@ -65,13 +70,16 @@ export const useVaultStore = create<VaultState>()(
       setLoadedDocuments: (loadedDocuments) => set({ loadedDocuments }),
       setVaultFolders: (vaultFolders) => set({ vaultFolders }),
       setImagePathRegistry: (imagePathRegistry) => set({ imagePathRegistry }),
+      addImageDataCache: (entries) =>
+        set((s) => ({ imageDataCache: { ...s.imageDataCache, ...entries } })),
+      clearImageDataCache: () => set({ imageDataCache: {} }),
       setIsLoading: (isLoading) => set({ isLoading }),
       setVaultReady: (vaultReady) => set({ vaultReady }),
       setLoadingProgress: (loadingProgress, loadingPhase = '') =>
         set({ loadingProgress, loadingPhase }),
       setError: (error) => set({ error }),
       clearVault: () =>
-        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], imagePathRegistry: null, error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '' }),
+        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], imagePathRegistry: null, imageDataCache: {}, error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '' }),
     }),
     {
       name: 'rembrandt-vault',
