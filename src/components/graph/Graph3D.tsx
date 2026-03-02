@@ -13,7 +13,7 @@ import { useGraphSimulation3D, type SimNode3D, type SimLink3D } from '@/hooks/us
 import { useFrameRate } from '@/hooks/useFrameRate'
 import { graphCallbacks } from '@/lib/graphEvents'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { buildNodeColorMap, getNodeColor, lightenColor } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, DEGREE_SIZE_MIN, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
 import type { GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -104,7 +104,7 @@ export default function Graph3D({ width, height }: Props) {
         const mat = mesh.material as THREE.MeshBasicMaterial
         const baseColor = getNodeColor(node, nodeColorMode, nodeColorMap)
         const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
-        const lightFactor = (1 - sf) * 0.55
+        const lightFactor = (1 - sf) * DEGREE_LIGHT_MAX
         mat.color.set(lightFactor > 0.01 ? lightenColor(baseColor, lightFactor) : baseColor)
       }
     })
@@ -229,18 +229,16 @@ export default function Graph3D({ width, height }: Props) {
     nodes.forEach(node => {
       const color = getNodeColor(node, nodeColorMode, nodeColorMap)
       const deg3d = degMap.get(node.id) ?? 0
-      const sf3d = 0.55 + Math.sqrt((deg3d + 1) / (maxDeg3D + 1)) * 0.45
+      const sf3d = degreeScaleFactor(deg3d, maxDeg3D)
       const baseScale = nodeRadiusRef.current / 7
-      // Lighten low-degree nodes toward white; opaque = no sorting overhead
-      const lightFactor = (1 - sf3d) * 0.55
+      const lightFactor = (1 - sf3d) * DEGREE_LIGHT_MAX
       const finalColor = lightFactor > 0.01 ? lightenColor(color, lightFactor) : color
-      // transparent: true only for hover-neighbor dimming (overridden during hover)
       const mat = new THREE.MeshBasicMaterial({ color: finalColor, transparent: true, opacity: 1.0 })
       const mesh = new THREE.Mesh(node.isImage ? octaGeo : sphereGeo, mat)
-      mesh.scale.setScalar(baseScale * sf3d)
+      mesh.scale.setScalar(baseScale * (DEGREE_SIZE_MIN + sf3d * (1 - DEGREE_SIZE_MIN)))
       mesh.userData.nodeId = node.id
       mesh.userData.docId = node.docId
-      mesh.userData.degreeScale = sf3d  // cache for nodeRadius effect
+      mesh.userData.degreeScale = sf3d  // cache for nodeRadius + color refresh
       scene.add(mesh)
       nodeMeshesRef.current.set(node.id, mesh)
 
@@ -473,7 +471,7 @@ export default function Graph3D({ width, height }: Props) {
     const baseScale = physics.nodeRadius / 7
     nodeMeshesRef.current.forEach(mesh => {
       const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
-      mesh.scale.setScalar(baseScale * sf)
+      mesh.scale.setScalar(baseScale * (DEGREE_SIZE_MIN + sf * (1 - DEGREE_SIZE_MIN)))
     })
   }, [physics.nodeRadius])
 

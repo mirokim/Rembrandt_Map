@@ -3,7 +3,7 @@ import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
-import { buildNodeColorMap, getNodeColor, lightenColor } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, DEGREE_SIZE_MIN, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
 import type { GraphNode } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -122,16 +122,11 @@ export default function Graph2DCanvas({ width, height }: Props) {
       // Obsidian-style: radius scales with sqrt(degree+1)
       const deg = degreeMap.get(simNode.id) ?? 0
       const baseNr = physicsRef.current.nodeRadius
-      const scaleFactor = Math.sqrt((deg + 1) / (maxDeg + 1))
-      // clamp: min 55% ~ max 100% of baseNr
-      const sizeScale = 0.55 + scaleFactor * 0.45
-      const nr = baseNr * sizeScale
-
-      // Brightness: low-degree nodes get white mixed in (max 55% white → 0% white)
-      // Selected node always shows original color
-      const lightFactor = isSelected ? 0 : (1 - scaleFactor) * 0.55
+      const sf = degreeScaleFactor(deg, maxDeg)
+      const nr = baseNr * (DEGREE_SIZE_MIN + sf * (1 - DEGREE_SIZE_MIN))
+      const lightFactor = isSelected ? 0 : (1 - sf) * DEGREE_LIGHT_MAX
       ctx.globalAlpha = isSelected ? 1 : 0.9
-      ctx.fillStyle = lightFactor > 0 ? lightenColor(color, lightFactor) : color
+      ctx.fillStyle = lightFactor > 0.01 ? lightenColor(color, lightFactor) : color
 
       if (nodeData.isImage) {
         // 이미지 노드: 다이아몬드(마름모) 형태
@@ -162,9 +157,8 @@ export default function Graph2DCanvas({ width, height }: Props) {
         ctx.setLineDash([4 / scale, 3 / scale])
         ctx.beginPath()
         const selDeg = degreeMapRef.current.get(selId) ?? 0
-        const selMaxDeg = maxDegreeRef.current
-        const selSizeFactor = 0.55 + Math.sqrt((selDeg + 1) / (selMaxDeg + 1)) * 0.45
-        const selNr = physicsRef.current.nodeRadius * selSizeFactor
+        const selSf = degreeScaleFactor(selDeg, maxDegreeRef.current)
+        const selNr = physicsRef.current.nodeRadius * (DEGREE_SIZE_MIN + selSf * (1 - DEGREE_SIZE_MIN))
         ctx.arc(selNode.x, selNode.y, (selNr + 8) / scale, 0, Math.PI * 2)
         ctx.stroke()
         ctx.setLineDash([])

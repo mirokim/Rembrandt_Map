@@ -4,7 +4,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { buildNodeColorMap, getNodeColor, lightenColor } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, DEGREE_SIZE_MIN, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
 import type { GraphNode, GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -524,11 +524,9 @@ export default function Graph2D({ width, height }: Props) {
 
               // Degree-based size + brightness (Obsidian style)
               const deg = degreeMap.get(node.id) ?? 0
-              const scaleFactor = Math.sqrt((deg + 1) / (maxDegree + 1))
-              const sizeScale = 0.55 + scaleFactor * 0.45
-              const baseNr = physics.nodeRadius
-              const nr = baseNr * sizeScale
-              const lightFactor = isSelected ? 0 : (1 - scaleFactor) * 0.55
+              const sf = degreeScaleFactor(deg, maxDegree)
+              const nr = physics.nodeRadius * (DEGREE_SIZE_MIN + sf * (1 - DEGREE_SIZE_MIN))
+              const lightFactor = isSelected ? 0 : (1 - sf) * DEGREE_LIGHT_MAX
               const color = lightFactor > 0.01 ? lightenColor(baseColor, lightFactor) : baseColor
 
               const commonProps = {

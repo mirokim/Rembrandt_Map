@@ -211,19 +211,41 @@ export function buildNodeColorMap(
 }
 
 /**
- * Lighten a hex color toward white by `factor` (0 = original, 1 = white).
- * Used for degree-proportional node brightness: low-degree nodes get more white mixed in.
- * Returns a CSS `rgb(...)` string. Supports both #rrggbb and #rgb formats.
+ * Lighten a color toward white by `factor` (0 = original, 1 = white).
+ * Supports #rrggbb, #rgb, and rgb(r,g,b) inputs.
  */
-export function lightenColor(hex: string, factor: number): string {
-  if (factor <= 0) return hex
-  const h = hex.replace('#', '')
-  const full = h.length === 3
-    ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
-    : h
-  const r = parseInt(full.slice(0, 2), 16)
-  const g = parseInt(full.slice(2, 4), 16)
-  const b = parseInt(full.slice(4, 6), 16)
+export function lightenColor(color: string, factor: number): string {
+  if (factor <= 0) return color
   const f = Math.min(1, Math.max(0, factor))
+  let r: number, g: number, b: number
+
+  if (color.startsWith('rgb')) {
+    // rgb(r, g, b) format
+    const m = color.match(/(\d+),\s*(\d+),\s*(\d+)/)
+    if (!m) return color
+    r = parseInt(m[1]); g = parseInt(m[2]); b = parseInt(m[3])
+  } else {
+    const h = color.replace('#', '')
+    const full = h.length === 3
+      ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+      : h
+    r = parseInt(full.slice(0, 2), 16)
+    g = parseInt(full.slice(2, 4), 16)
+    b = parseInt(full.slice(4, 6), 16)
+  }
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return color
   return `rgb(${Math.round(r + (255 - r) * f)},${Math.round(g + (255 - g) * f)},${Math.round(b + (255 - b) * f)})`
 }
+
+/**
+ * Compute Obsidian-style degree scale factor (0–1) for a node.
+ * scaleFactor → closer to 1 for high-degree nodes, closer to 0 for isolated ones.
+ */
+export function degreeScaleFactor(degree: number, maxDegree: number): number {
+  return Math.sqrt((degree + 1) / (Math.max(1, maxDegree) + 1))
+}
+
+/** Min size ratio for zero-degree nodes */
+export const DEGREE_SIZE_MIN = 0.25
+/** Max white-mix ratio for zero-degree nodes */
+export const DEGREE_LIGHT_MAX = 0.65
