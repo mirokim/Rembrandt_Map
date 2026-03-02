@@ -114,18 +114,32 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   philosopher: '고대 철학자처럼 말하세요. "소크라테스라면 이렇게 질문했을 것입니다..." 같은 심오한 어투를 사용하세요.',
 }
 
-/** Human-readable label for each debate provider */
+/** Human-readable label for each debate participant (provider or persona) */
 export const DEBATE_PROVIDER_LABELS: Record<string, string> = {
+  // Provider fallbacks
   openai: 'GPT',
   anthropic: 'Claude',
   gemini: 'Gemini',
   grok: 'Grok',
+  // Persona entries
+  chief_director: 'Chief',
+  art_director: 'Art',
+  plan_director: 'Design',
+  level_director: 'Level',
+  prog_director: 'Prog',
 }
 
-/** Accent color for each debate provider */
+/** Accent color for each debate participant (provider or persona) */
 export const DEBATE_PROVIDER_COLORS: Record<string, string> = {
+  // Provider fallbacks
   openai: '#10a37f',
   anthropic: '#d97706',
   gemini: '#4285f4',
   grok: '#ef4444',
+  // Persona entries
+  chief_director: '#9b59b6',
+  art_director: '#00bcd4',
+  plan_director: '#ff9800',
+  level_director: '#4caf50',
+  prog_director: '#2196f3',
 }

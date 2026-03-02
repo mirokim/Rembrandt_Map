@@ -10,8 +10,10 @@ import {
   frontendKeywordSearch,
   buildDeepGraphContext,
   buildGlobalGraphContext,
+  getGlobalContextDocIds,
   tokenizeQuery,
 } from '@/lib/graphRAG'
+import { useGraphStore } from '@/stores/graphStore'
 
 // ── Obsidian MD conversion (MD 변환 에디터 파이프라인) ─────────────────────────
 
@@ -200,6 +202,7 @@ export async function fetchRAGContext(
     // ── 전체 탐색 인텐트: 허브 노드 기반 전체 그래프 탐색 ──────────────────
     // 키워드 검색을 건너뛰고 바로 허브 중심 BFS로 광범위한 컨텍스트 수집
     if (GLOBAL_INTENT_RE.test(userMessage)) {
+      useGraphStore.getState().setAiHighlightNodes(getGlobalContextDocIds(35, 4))
       return buildGlobalGraphContext(35, 4)
     }
 
@@ -235,6 +238,9 @@ export async function fetchRAGContext(
 
     // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
     // queryTerms 전달 → 패시지-레벨 검색으로 각 문서의 가장 관련된 섹션 선택
+    if (reranked.length > 0) {
+      useGraphStore.getState().setAiHighlightNodes(reranked.map(r => r.doc_id))
+    }
     const ctx = buildDeepGraphContext(reranked, 3, 20, tokenizeQuery(userMessage))
     logger.debug(`[RAG] 컨텍스트 생성 완료: ${ctx.length}자`)
     return ctx
@@ -373,5 +379,10 @@ export async function streamMessage(
     default: {
       await streamMockResponse(persona, userMessage, onChunk)
     }
+  }
+
+  // 채팅 RAG 하이라이트 클리어 (GraphPanel 분석은 자체 관리)
+  if (overrideRagContext === undefined) {
+    useGraphStore.getState().setAiHighlightNodes([])
   }
 }

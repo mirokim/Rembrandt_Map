@@ -75,6 +75,14 @@ export interface ImplicitLink {
   similarity: number
 }
 
+// Serialized form stored in IndexedDB (Maps → plain arrays for JSON compatibility)
+export interface SerializedTfIdf {
+  schemaVersion: 2
+  fingerprint: string
+  idf: [string, number][]
+  docs: { docId: string; filename: string; speaker: string; vector: [string, number][]; norm: number }[]
+}
+
 export class TfIdfIndex {
   private docs: TfIdfDoc[] = []
   private idf: Map<string, number> = new Map()
@@ -84,6 +92,38 @@ export class TfIdfIndex {
 
   get isBuilt() { return this.built }
   get docCount() { return this.docs.length }
+
+  /** Serialize index state to a plain object suitable for IndexedDB storage. */
+  serialize(fingerprint: string): SerializedTfIdf {
+    return {
+      schemaVersion: 2,
+      fingerprint,
+      idf: [...this.idf.entries()],
+      docs: this.docs.map(d => ({
+        docId: d.docId,
+        filename: d.filename,
+        speaker: d.speaker,
+        vector: [...d.vector.entries()],
+        norm: d.norm,
+      })),
+    }
+  }
+
+  /** Restore index state from a previously serialized object. */
+  restore(data: SerializedTfIdf): void {
+    this.idf = new Map(data.idf)
+    this.docs = data.docs.map(d => ({
+      docId: d.docId,
+      filename: d.filename,
+      speaker: d.speaker,
+      vector: new Map(d.vector),
+      norm: d.norm,
+    }))
+    this._implicitLinks = null
+    this._implicitAdjRef = null
+    this.built = true
+    logger.debug(`[graphAnalysis] TF-IDF 인덱스 캐시 복원: ${this.docs.length}개 문서`)
+  }
 
   build(loadedDocuments: LoadedDocument[]): void {
     this.docs = []

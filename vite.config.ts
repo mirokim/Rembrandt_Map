@@ -11,6 +11,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    port: 5177,
+  },
   build: {
     outDir: 'dist',
     target: 'chrome120',

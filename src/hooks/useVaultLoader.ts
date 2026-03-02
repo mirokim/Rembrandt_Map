@@ -19,6 +19,7 @@ import { vaultDocsToChunks } from '@/lib/vaultToChunks'
 import { parsePersonaConfig } from '@/lib/personaVaultConfig'
 import { tfidfIndex } from '@/lib/graphAnalysis'
 import { buildAdjacencyMap } from '@/lib/graphRAG'
+import { buildFingerprint, loadTfIdfCache, saveTfIdfCache } from '@/lib/tfidfCache'
 
 export function useVaultLoader() {
   const { vaultPath, setLoadedDocuments, setVaultFolders, setIsLoading, setVaultReady, setLoadingProgress, setError } =
@@ -85,10 +86,18 @@ export function useVaultLoader() {
         setLinks(links)
         setLoadingProgress(95, '설정 불러오는 중...')
 
-        // TF-IDF 인덱스 빌드 (비동기적으로 백그라운드 실행 — UI 블로킹 방지)
-        setTimeout(() => {
-          tfidfIndex.build(docs)
-          // 묵시적 연결 사전 계산 — TF-IDF 빌드 직후 adjacency 기반 캐시 워밍
+        // TF-IDF 인덱스: 캐시 히트 시 복원, 미스 시 빌드 후 저장
+        // setTimeout(0)으로 UI 블로킹 방지
+        const fingerprint = buildFingerprint(docs)
+        setTimeout(async () => {
+          const cached = await loadTfIdfCache(dirPath, fingerprint)
+          if (cached) {
+            tfidfIndex.restore(cached)
+          } else {
+            tfidfIndex.build(docs)
+            void saveTfIdfCache(dirPath, tfidfIndex.serialize(fingerprint))
+          }
+          // 묵시적 연결 사전 계산 — adjacency 기반 캐시 워밍
           const { links: currentLinks } = useGraphStore.getState()
           if (currentLinks.length > 0) {
             const adj = buildAdjacencyMap(currentLinks)

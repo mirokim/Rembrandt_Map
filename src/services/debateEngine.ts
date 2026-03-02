@@ -13,10 +13,12 @@ import type {
 } from '@/types'
 import { DEBATE_PROVIDER_LABELS, ROLE_OPTIONS, ROLE_DESCRIPTIONS } from './debateRoles'
 import { generateId } from '@/lib/utils'
-import { getApiKey } from '@/stores/settingsStore'
+import { getApiKey, useSettingsStore } from '@/stores/settingsStore'
+import { getProviderForModel } from '@/lib/modelConfig'
 import type { ProviderId } from '@/lib/modelConfig'
+import type { DirectorId } from '@/types'
 
-// ── Default models per provider for debate ──────────────────────────────────
+// ── Default models per provider (fallback for non-persona participants) ───────
 
 const DEFAULT_DEBATE_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
@@ -44,6 +46,10 @@ function buildSystemPrompt(
     .map((p) => DEBATE_PROVIDER_LABELS[p] || p)
     .join(', ')
 
+  const labelList = config.participants
+    .map((p) => `"[${DEBATE_PROVIDER_LABELS[p] || p}]:"`)
+    .join(', ')
+
   const base = `당신은 "${label}"입니다. 여러 AI가 참여하는 토론에 참가하고 있습니다.
 토론 주제: "${config.topic}"
 참여자: ${participantList}
@@ -52,7 +58,7 @@ function buildSystemPrompt(
 - 한국어로 답변하세요.
 - 간결하고 핵심적으로 답변하세요 (200~400자).
 - 다른 참여자의 의견을 구체적으로 언급하며 발전시키세요.
-- "[GPT]:", "[Claude]:", "[Gemini]:", "[Grok]:" 형식의 라벨은 다른 참여자의 발언입니다.
+- ${labelList} 형식의 라벨은 다른 참여자의 발언입니다.
 - "[User]:" 라벨은 토론을 지켜보는 사용자의 개입입니다. 사용자의 질문이나 요청에 우선적으로 응답하세요.
 
 정확성 및 신뢰성 원칙 (반드시 준수):
@@ -274,7 +280,7 @@ async function waitWhilePaused(
 // ── Call provider via Rembrandt MAP's streaming providers ────────────────────
 
 async function callDebateProvider(
-  provider: string,
+  persona: string,
   systemPrompt: string,
   apiMessages: ApiMessage[],
   signal: AbortSignal,
@@ -283,14 +289,23 @@ async function callDebateProvider(
     return { content: '요청이 취소되었습니다.', isError: true }
   }
 
-  const apiKey = getApiKey(provider as ProviderId)
-  if (!apiKey) {
-    return { content: `[${DEBATE_PROVIDER_LABELS[provider] || provider}] API 키가 설정되지 않았습니다.`, isError: true }
+  // Resolve model: persona-based lookup first, then provider-based default fallback
+  const { personaModels } = useSettingsStore.getState()
+  const model =
+    (personaModels as Record<string, string>)[persona] ??
+    DEFAULT_DEBATE_MODELS[persona]
+  if (!model) {
+    return { content: `모델을 찾을 수 없습니다: ${persona}`, isError: true }
   }
 
-  const model = DEFAULT_DEBATE_MODELS[provider]
-  if (!model) {
-    return { content: `지원하지 않는 제공자입니다: ${provider}`, isError: true }
+  // Derive provider from model ID; fall back to treating persona as a raw provider ID
+  const provider: ProviderId =
+    getProviderForModel(model) ?? (persona as ProviderId)
+
+  const apiKey = getApiKey(provider)
+  if (!apiKey) {
+    const label = DEBATE_PROVIDER_LABELS[persona] || persona
+    return { content: `[${label}] API 키가 설정되지 않았습니다.`, isError: true }
   }
 
   // Convert ApiMessage[] to simple {role, content: string}[] for the streaming providers

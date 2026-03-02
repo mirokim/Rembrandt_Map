@@ -1,4 +1,4 @@
-import { Monitor, Settings, Minus, Square, X, Terminal, PanelLeft, PanelRight } from 'lucide-react'
+import { Monitor, Settings, Minus, Square, X, Terminal, PanelLeft, PanelRight, Type } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/lib/utils'
@@ -12,8 +12,9 @@ export default function TopBar() {
     setGraphMode, setPanelOpacity,
     toggleLeftPanel, toggleRightPanel,
   } = useUIStore()
-  const { toggleSettingsPanel } = useSettingsStore()
+  const { toggleSettingsPanel, toggleNodeLabels } = useSettingsStore()
   const isFast = useSettingsStore(s => s.paragraphRenderQuality === 'fast')
+  const showNodeLabels = useSettingsStore(s => s.showNodeLabels)
 
   const isElectron =
     typeof window !== 'undefined' && window.electronAPI?.isElectron === true
@@ -62,8 +63,8 @@ export default function TopBar() {
           <span>{graphMode.toUpperCase()}</span>
         </button>}
 
-        {/* Panel opacity slider — right of 3D toggle */}
-        <div className="flex items-center gap-1.5 px-2">
+        {/* Panel opacity slider — right of 3D toggle (hidden in fast mode) */}
+        {!isFast && <div className="flex items-center gap-1.5 px-2">
           <span style={{ fontSize: 9, color: 'var(--color-text-muted)', lineHeight: 1 }}>◈</span>
           <input
             type="range"
@@ -85,7 +86,21 @@ export default function TopBar() {
             title="Panel opacity"
             aria-label="Adjust panel opacity"
           />
-        </div>
+        </div>}
+
+        {/* Node label toggle */}
+        <button
+          onClick={toggleNodeLabels}
+          className={cn(
+            'flex items-center justify-center w-7 h-7 rounded transition-colors',
+            'hover:bg-[var(--color-bg-hover)]'
+          )}
+          style={{ color: showNodeLabels ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}
+          title={showNodeLabels ? '노드 라벨 숨기기' : '노드 라벨 표시'}
+          aria-label="Toggle node labels"
+        >
+          <Type size={13} />
+        </button>
 
         {/* Settings button */}
         <button

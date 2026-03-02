@@ -1,20 +1,23 @@
 /**
  * DebateSettingsContent — Debate configuration UI for SettingsPanel.
- * Adapted from Onion_flow's DebateSettingsContent.tsx for Rembrandt MAP.
- *
- * "Enabled" providers = those that have VITE_*_API_KEY set in the environment.
+ * Participants are personas (chief_director, art_director, …), not raw providers.
+ * A persona is "enabled" when its assigned model's provider has an API key configured.
  */
 import { useMemo, useRef } from 'react'
 import { AlertCircle, FileText, Upload, X } from 'lucide-react'
 import { useDebateStore } from '@/stores/debateStore'
+import { useSettingsStore, getApiKey } from '@/stores/settingsStore'
+import { getProviderForModel } from '@/lib/modelConfig'
+import { SPEAKER_IDS, SPEAKER_CONFIG } from '@/lib/speakerConfig'
 import { generateId } from '@/lib/utils'
 import {
   ROLE_OPTIONS,
   ROLE_GROUPS,
-  DEBATE_PROVIDER_LABELS,
-  DEBATE_PROVIDER_COLORS,
 } from '@/services/debateRoles'
 import type { DiscussionMode, ReferenceFile } from '@/types'
+
+/** All participant candidates — the 5 director personas */
+const ALL_PERSONAS = SPEAKER_IDS
 
 const DEBATE_MODES: DiscussionMode[] = ['roundRobin', 'freeDiscussion', 'roleAssignment', 'battle']
 
@@ -32,7 +35,6 @@ const MODE_DESCRIPTIONS: Record<DiscussionMode, string> = {
   battle: 'AI 2명이 대결하고 1명이 심판으로 채점합니다',
 }
 
-const ALL_PROVIDERS = ['anthropic', 'openai', 'gemini', 'grok'] as const
 const DELAY_OPTIONS = [5, 10, 15, 30] as const
 const REF_MAX_LENGTH = 10_000
 const MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -63,12 +65,19 @@ export function DebateSettingsContent() {
     useReference, referenceText, referenceFiles, pacingMode, autoDelay,
   } = settings
 
-  // Providers with a configured API key
+  // Personas whose assigned model's provider has an API key set
+  const apiKeys = useSettingsStore(s => s.apiKeys)
+  const personaModels = useSettingsStore(s => s.personaModels)
   const enabledProviders = useMemo(
-    () => ALL_PROVIDERS.filter(
-      (p) => Boolean((import.meta.env as Record<string, string>)[`VITE_${p.toUpperCase()}_API_KEY`])
-    ),
-    [],
+    () => ALL_PERSONAS.filter((p) => {
+      const model = (personaModels as Record<string, string>)[p]
+      if (!model) return false
+      const provider = getProviderForModel(model)
+      if (!provider) return false
+      return Boolean(getApiKey(provider))
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [apiKeys, personaModels],
   )
 
   const handleFileUpload = async (fileList: FileList | null) => {
@@ -135,7 +144,7 @@ export function DebateSettingsContent() {
             style={{ background: 'rgba(255,152,0,0.1)', color: '#ff9800' }}
           >
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            <span>.env에 2개 이상의 AI API 키를 추가하세요</span>
+            <span>AI 설정에서 2개 이상의 페르소나에 API 키를 설정하세요</span>
           </div>
         )}
         {mode === 'battle' && selectedProviders.length >= 2 && selectedProviders.length < 3 && (
@@ -150,6 +159,7 @@ export function DebateSettingsContent() {
         <div className="flex flex-wrap gap-1.5">
           {enabledProviders.map((p) => {
             const selected = selectedProviders.includes(p)
+            const meta = SPEAKER_CONFIG[p]
             return (
               <button
                 key={p}
@@ -158,9 +168,9 @@ export function DebateSettingsContent() {
                 style={
                   selected
                     ? {
-                        background: `${DEBATE_PROVIDER_COLORS[p]}12`,
-                        border: `1px solid ${DEBATE_PROVIDER_COLORS[p]}60`,
-                        color: DEBATE_PROVIDER_COLORS[p],
+                        background: `${meta.color}12`,
+                        border: `1px solid ${meta.color}60`,
+                        color: meta.color,
                         fontWeight: 600,
                       }
                     : {
@@ -170,8 +180,8 @@ export function DebateSettingsContent() {
                       }
                 }
               >
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: DEBATE_PROVIDER_COLORS[p] }} />
-                {DEBATE_PROVIDER_LABELS[p]}
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: meta.color }} />
+                {meta.label}
               </button>
             )
           })}
@@ -185,6 +195,7 @@ export function DebateSettingsContent() {
           <div className="flex flex-wrap gap-1.5">
             {selectedProviders.map((p) => {
               const isJudge = judgeProvider === p
+              const meta = SPEAKER_CONFIG[p as keyof typeof SPEAKER_CONFIG]
               return (
                 <button
                   key={p}
@@ -196,8 +207,8 @@ export function DebateSettingsContent() {
                       : { background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }
                   }
                 >
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: DEBATE_PROVIDER_COLORS[p] }} />
-                  {DEBATE_PROVIDER_LABELS[p]}
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: meta?.color ?? '#888' }} />
+                  {meta?.label ?? p}
                 </button>
               )
             })}
@@ -216,11 +227,12 @@ export function DebateSettingsContent() {
             {selectedProviders.map((p) => {
               const isJudgeAI = mode === 'battle' && judgeProvider === p
               const role = roles.find((r) => r.provider === p)?.role || '중립'
+              const meta = SPEAKER_CONFIG[p as keyof typeof SPEAKER_CONFIG]
               return (
                 <div key={p} className="flex items-center gap-2.5">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: DEBATE_PROVIDER_COLORS[p] || '#888' }} />
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: meta?.color ?? '#888' }} />
                   <span className="text-xs w-14 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                    {DEBATE_PROVIDER_LABELS[p]}
+                    {meta?.label ?? p}
                   </span>
                   {isJudgeAI ? (
                     <span className="flex-1 px-2 py-1 text-xs font-semibold" style={{ color: '#ff9800' }}>심판</span>

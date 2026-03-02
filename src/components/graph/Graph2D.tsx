@@ -277,31 +277,44 @@ export default function Graph2D({ width, height }: Props) {
     const style = document.createElement('style')
     style.textContent = `
       @keyframes aiScan {
-        0%, 100% { filter: drop-shadow(0 0 3px #34d399); }
-        50%       { filter: drop-shadow(0 0 12px #34d399) drop-shadow(0 0 5px #34d399); }
+        0%, 100% { opacity: 0.45; }
+        50%       { opacity: 1; }
       }
       .graph-faded circle:not([data-hl]) { opacity: 0.12 !important; filter: none !important; }
       .graph-faded line:not([data-hl])   { opacity: 0.04 !important; stroke: var(--color-border) !important; stroke-width: 1px !important; }
       .graph-faded text:not([data-hl])   { opacity: 0 !important; }
+      .graph-ai-faded circle:not([data-hl]) { opacity: 0.1 !important; filter: none !important; }
+      .graph-ai-faded line  { opacity: 0.05 !important; }
+      .graph-ai-faded text:not([data-hl])   { opacity: 0 !important; }
     `
     document.head.appendChild(style)
     return () => { style.remove() }
   }, [])
 
-  // ── AI highlight: pulse CSS animation on scanned nodes ────────────────────
+  // ── AI highlight: pulse + fade non-highlighted nodes ─────────────────────
   useLayoutEffect(() => {
     const nodeMap = nodeEls.current
+    const graphGroup = graphGroupRef.current
     if (aiHighlightNodeIds.length === 0) {
-      nodeMap.forEach(el => { el.style.animation = '' })
+      graphGroup?.classList.remove('graph-ai-faded')
+      nodeMap.forEach(el => {
+        el.style.animation = ''
+        el.removeAttribute('data-hl')
+      })
       return
     }
     const highlightSet = new Set(aiHighlightNodeIds)
+    graphGroup?.classList.add('graph-ai-faded')
     nodes.forEach(n => {
       const el = nodeMap.get(n.id)
       if (!el) return
-      el.style.animation = highlightSet.has(n.id)
-        ? 'aiScan 1.2s ease-in-out infinite'
-        : ''
+      if (highlightSet.has(n.docId)) {
+        el.setAttribute('data-hl', '1')
+        el.style.animation = 'aiScan 1.4s ease-in-out infinite'
+      } else {
+        el.removeAttribute('data-hl')
+        el.style.animation = ''
+      }
     })
   }, [aiHighlightNodeIds, nodes])
 
@@ -492,7 +505,7 @@ export default function Graph2D({ width, height }: Props) {
                   key={node.id}
                   ref={el => { if (el) nodeEls.current.set(node.id, el) }}
                   cx={width / 2} cy={height / 2}
-                  r={isSelected ? 10 : 7}
+                  r={isSelected ? 3.5 : 2}
                   fill={color}
                   fillOpacity={isSelected ? 1 : 0.82}
                   style={{

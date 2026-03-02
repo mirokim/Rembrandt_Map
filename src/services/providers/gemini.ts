@@ -85,7 +85,7 @@ export async function streamCompletion(
       },
       contents: geminiMessages,
       generationConfig: {
-        maxOutputTokens: 1024,
+        maxOutputTokens: 8192,
       },
     }),
   })
