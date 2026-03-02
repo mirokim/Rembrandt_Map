@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { X, FileText } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultStore } from '@/stores/vaultStore'
 
@@ -8,9 +8,10 @@ import { useVaultStore } from '@/stores/vaultStore'
  * editingDocId = 'img:{normalizedFilename}' 형태일 때 렌더링됨.
  */
 export default function ImageViewer() {
-  const { editingDocId, closeEditor } = useUIStore()
+  const { editingDocId, closeEditor, openInEditor } = useUIStore()
   const imageDataCache = useVaultStore(s => s.imageDataCache)
   const imagePathRegistry = useVaultStore(s => s.imagePathRegistry)
+  const loadedDocuments = useVaultStore(s => s.loadedDocuments)
   const [dataUrl, setDataUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -24,6 +25,14 @@ export default function ImageViewer() {
     : null
 
   const displayName = originalRef ?? normalizedRef ?? '이미지'
+
+  // 이 이미지를 ![[...]]로 참조하는 문서 목록
+  const referencingDocs = useMemo(() => {
+    if (!normalizedRef || !loadedDocuments) return []
+    return loadedDocuments.filter(d =>
+      d.imageRefs?.some(r => r.toLowerCase().replace(/\s+/g, '_') === normalizedRef)
+    )
+  }, [loadedDocuments, normalizedRef])
 
   useEffect(() => {
     if (!normalizedRef) return
@@ -53,23 +62,56 @@ export default function ImageViewer() {
     <div className="flex flex-col h-full">
       {/* 헤더 */}
       <div
-        className="shrink-0 flex items-center justify-between px-4 py-3"
+        className="shrink-0 flex flex-col px-4 pt-3 pb-0"
         style={{ borderBottom: '1px solid var(--color-border)' }}
       >
-        <span
-          className="text-xs font-mono truncate"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          🖼️ {displayName}
-        </span>
-        <button
-          onClick={closeEditor}
-          className="p-1 rounded transition-colors hover:bg-[var(--color-bg-hover)]"
-          style={{ color: 'var(--color-text-muted)' }}
-          aria-label="이미지 뷰어 닫기"
-        >
-          <X size={14} />
-        </button>
+        {/* 파일명 + 닫기 */}
+        <div className="flex items-center justify-between pb-3">
+          <span
+            className="text-xs font-mono truncate"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            🖼️ {displayName}
+          </span>
+          <button
+            onClick={closeEditor}
+            className="p-1 rounded transition-colors hover:bg-[var(--color-bg-hover)]"
+            style={{ color: 'var(--color-text-muted)' }}
+            aria-label="이미지 뷰어 닫기"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* 참조 문서 버튼 */}
+        {referencingDocs.length > 0 && (
+          <div className="flex items-center gap-1.5 pb-2.5 flex-wrap">
+            <span
+              className="text-[10px] shrink-0"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              참조 문서:
+            </span>
+            {referencingDocs.map(doc => (
+              <button
+                key={doc.id}
+                onClick={() => openInEditor(doc.id)}
+                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--color-bg-hover)]"
+                style={{
+                  color: 'var(--color-accent, #60a5fa)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-surface)',
+                  cursor: 'pointer',
+                  maxWidth: 160,
+                }}
+                title={doc.filename}
+              >
+                <FileText size={10} className="shrink-0" />
+                <span className="truncate">{doc.filename}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 이미지 영역 */}

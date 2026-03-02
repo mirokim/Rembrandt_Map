@@ -88,6 +88,8 @@ export default function Graph3D({ width, height }: Props) {
   )
   const selectedNodeIdRef = useRef(selectedNodeId)
   selectedNodeIdRef.current = selectedNodeId
+  const nodeRadiusRef = useRef(physics.nodeRadius)
+  nodeRadiusRef.current = physics.nodeRadius
 
   const [tooltip, setTooltip] = useState<{ nodeId: string; x: number; y: number } | null>(null)
 
@@ -324,13 +326,14 @@ export default function Graph3D({ width, height }: Props) {
       const aiSet = aiHighlightRef.current
       const prevAiSet = prevAiHighlightRef.current
       if (aiSet.size > 0) {
-        const pulseFactor = 1 + Math.sin(tickRef.current * 0.06) * 0.3
+        const baseScale = nodeRadiusRef.current / 7
+        const pulseFactor = baseScale * (1 + Math.sin(tickRef.current * 0.06) * 0.3)
         aiSet.forEach(nodeId => {
           nodeMeshesRef.current.get(nodeId)?.scale.setScalar(pulseFactor)
         })
         // Reset nodes that left the highlight set
         prevAiSet.forEach(nodeId => {
-          if (!aiSet.has(nodeId)) nodeMeshesRef.current.get(nodeId)?.scale.setScalar(1)
+          if (!aiSet.has(nodeId)) nodeMeshesRef.current.get(nodeId)?.scale.setScalar(baseScale)
         })
       }
       prevAiHighlightRef.current = aiSet
@@ -433,6 +436,12 @@ export default function Graph3D({ width, height }: Props) {
       lineMatRef.current.needsUpdate = true
     }
   }, [physics.linkOpacity])
+
+  // ── Node size 실시간 반영 ────────────────────────────────────────────────
+  useEffect(() => {
+    const scale = physics.nodeRadius / 7
+    nodeMeshesRef.current.forEach(mesh => mesh.scale.setScalar(scale))
+  }, [physics.nodeRadius])
 
   // ── CSS2DRenderer labels: hide only when overlay panel is active ────────────
   useEffect(() => {

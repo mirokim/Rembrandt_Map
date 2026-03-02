@@ -279,7 +279,7 @@ export async function streamMessage(
   attachments?: Attachment[],
   overrideRagContext?: string   // 키워드 검색 우회 — 노드 선택 AI 분석 등에 사용
 ): Promise<void> {
-  const { personaModels, projectInfo, directorBios, customPersonas, personaPromptOverrides } = useSettingsStore.getState()
+  const { personaModels, projectInfo, directorBios, customPersonas, personaPromptOverrides, responseInstructions } = useSettingsStore.getState()
 
   // Resolve persona — may be a built-in director or a custom persona
   const customPersona = customPersonas.find(p => p.id === persona)
@@ -318,7 +318,7 @@ export async function streamMessage(
   const ragContext = overrideRagContext !== undefined
     ? overrideRagContext
     : await fetchRAGContext(userMessage, persona)
-  const systemPrompt = projectContext + basePrompt
+  const systemPrompt = projectContext + basePrompt + (responseInstructions.trim() ? '\n\n' + responseInstructions.trim() : '')
 
   // ── Attachment processing ───────────────────────────────────────────────────
   // Separate image attachments (→ vision API) from text attachments (→ message injection)

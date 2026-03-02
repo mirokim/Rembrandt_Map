@@ -49,6 +49,12 @@ export const vaultTheme = EditorView.theme({
     textUnderlineOffset: '2px',
     textDecorationColor: 'color-mix(in srgb, var(--color-accent) 50%, transparent)',
   },
+  '.cm-image-embed-widget': {
+    color: '#a78bfa',
+    cursor: 'pointer',
+    fontStyle: 'italic',
+    opacity: '0.85',
+  },
   '.cm-highlight-mark': {
     background: 'rgba(255, 210, 0, 0.22)',
     borderRadius: '2px',

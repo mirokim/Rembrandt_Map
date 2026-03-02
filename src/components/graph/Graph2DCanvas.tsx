@@ -104,9 +104,10 @@ export default function Graph2DCanvas({ width, height }: Props) {
       ctx.globalAlpha = isSelected ? 1 : 0.82
       ctx.fillStyle = color
 
+      const nr = physicsRef.current.nodeRadius
       if (nodeData.isImage) {
         // 이미지 노드: 다이아몬드(마름모) 형태
-        const r = isSelected ? 9 : 6
+        const r = isSelected ? nr + 2 : Math.max(nr - 1, 2)
         ctx.save()
         ctx.translate(simNode.x, simNode.y)
         ctx.rotate(Math.PI / 4)
@@ -116,7 +117,7 @@ export default function Graph2DCanvas({ width, height }: Props) {
         ctx.restore()
       } else {
         ctx.beginPath()
-        ctx.arc(simNode.x, simNode.y, isSelected ? 10 : 7, 0, Math.PI * 2)
+        ctx.arc(simNode.x, simNode.y, isSelected ? nr + 3 : nr, 0, Math.PI * 2)
         ctx.fill()
       }
     }
@@ -132,7 +133,7 @@ export default function Graph2DCanvas({ width, height }: Props) {
         ctx.lineWidth = 1.5 / scale
         ctx.setLineDash([4 / scale, 3 / scale])
         ctx.beginPath()
-        ctx.arc(selNode.x, selNode.y, 15 / scale, 0, Math.PI * 2)
+        ctx.arc(selNode.x, selNode.y, (physicsRef.current.nodeRadius + 8) / scale, 0, Math.PI * 2)
         ctx.stroke()
         ctx.setLineDash([])
       }
@@ -193,7 +194,7 @@ export default function Graph2DCanvas({ width, height }: Props) {
     if (cachedSimNodesRef.current.length > 0) drawCanvas()
     // drawCanvas is stable (only changes with width/height), listed deps are the triggers
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNodeId, showNodeLabels, nodeColorMode, nodeColorMap])
+  }, [selectedNodeId, showNodeLabels, nodeColorMode, nodeColorMap, physics.nodeRadius])
 
   // ── Wheel zoom ───────────────────────────────────────────────────────────────
   const handleWheel = useCallback((e: WheelEvent) => {

@@ -26,6 +26,14 @@ export interface ProjectInfo {
   currentSituation: string
 }
 
+export const DEFAULT_RESPONSE_INSTRUCTIONS =
+`응답 원칙:
+- 질문자의 표면적 질문 너머 실제 의도와 맥락을 파악하여, 그것에 맞춰 더 깊고 실질적으로 답변하세요.
+- 단순히 묻는 것만 답하지 말고, 질문 뒤에 숨겨진 문제나 다음 단계까지 선제적으로 짚어주세요.
+- 공식 문서나 브리핑 보고서 형태로 작성하지 마세요. 대화 상대에게 직접 말하듯 답변하세요.
+- "종합 분석 브리핑", "검토 완료" 같은 문서 제출 형식의 표현은 사용하지 마세요.
+- 제목·부제목 남발 없이 자연스러운 흐름으로 핵심을 전달하세요.`
+
 export const DEFAULT_PROJECT_INFO: ProjectInfo = {
   name: '',
   engine: '',
@@ -80,6 +88,8 @@ interface SettingsState {
   tagColors: Record<string, string>
   /** User-assigned hex colors per folder path (overrides auto-palette in graph) */
   folderColors: Record<string, string>
+  /** Global AI response format instructions (appended to every persona's system prompt) */
+  responseInstructions: string
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -106,6 +116,7 @@ interface SettingsState {
   removeTagPreset: (tag: string) => void
   setTagColor: (tag: string, color: string) => void
   setFolderColor: (folderPath: string, color: string) => void
+  setResponseInstructions: (v: string) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -153,6 +164,7 @@ export const useSettingsStore = create<SettingsState>()(
       tagPresets: [],
       tagColors: {},
       folderColors: {},
+      responseInstructions: DEFAULT_RESPONSE_INSTRUCTIONS,
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -253,6 +265,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       setFolderColor: (folderPath, color) =>
         set((s) => ({ folderColors: { ...s.folderColors, [folderPath]: color } })),
+
+      setResponseInstructions: (responseInstructions) => set({ responseInstructions }),
     }),
     {
       name: 'rembrandt-settings',
@@ -271,6 +285,7 @@ export const useSettingsStore = create<SettingsState>()(
         tagPresets: state.tagPresets,
         tagColors: state.tagColors,
         folderColors: state.folderColors,
+        responseInstructions: state.responseInstructions,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {

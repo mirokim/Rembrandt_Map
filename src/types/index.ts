@@ -78,6 +78,8 @@ export interface PhysicsParams {
   linkDistance: number
   /** Wire (edge) opacity — range 0.0–1.0, default 0.4 */
   linkOpacity: number
+  /** Node sphere radius in 2D px — range 2–20, default 7 */
+  nodeRadius: number
 }
 
 // ── Attachment types (Feature 4) ──────────────────────────────────────────────

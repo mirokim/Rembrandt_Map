@@ -22,7 +22,7 @@ import { buildAdjacencyMap } from '@/lib/graphRAG'
 import { buildFingerprint, loadTfIdfCache, saveTfIdfCache } from '@/lib/tfidfCache'
 
 export function useVaultLoader() {
-  const { vaultPath, setLoadedDocuments, setVaultFolders, setImagePathRegistry, addImageDataCache, clearImageDataCache, setIsLoading, setVaultReady, setLoadingProgress, setError } =
+  const { vaultPath, setLoadedDocuments, setVaultFolders, setImagePathRegistry, addImageDataCache, clearImageDataCache, setIsLoading, setVaultReady, setLoadingProgress, setError, setPendingFileCount } =
     useVaultStore()
   const { setNodes, setLinks, resetToMock } = useGraphStore()
   const { setIndexing, setChunkCount, setError: setBackendError } = useBackendStore()
@@ -43,6 +43,7 @@ export function useVaultLoader() {
         logger.debug(`[vault] ${files?.length ?? 0}개 파일, ${folders?.length ?? 0}개 폴더, ${Object.keys(imageRegistry ?? {}).length}개 이미지 로드됨 (${dirPath})`)
         setVaultFolders(folders ?? [])
         setImagePathRegistry(imageRegistry ?? null)
+        setPendingFileCount(files?.length ?? 0)
         setLoadingProgress(5, '파일 목록 로드 완료')
 
         if (!files || files.length === 0) {
@@ -169,10 +170,11 @@ export function useVaultLoader() {
         setLoadingProgress(100, '')
         setVaultReady(true)
         setIsLoading(false)
+        setPendingFileCount(null)
       }
     },
     [setLoadedDocuments, setVaultFolders, setImagePathRegistry, addImageDataCache, clearImageDataCache,
-     setIsLoading, setVaultReady, setLoadingProgress, setError,
+     setIsLoading, setVaultReady, setLoadingProgress, setError, setPendingFileCount,
      setNodes, setLinks, resetToMock, setIndexing, setChunkCount, setBackendError,
      loadVaultPersonas, resetVaultPersonas]
   )

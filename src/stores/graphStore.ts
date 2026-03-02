@@ -8,6 +8,7 @@ const DEFAULT_PHYSICS: PhysicsParams = {
   linkStrength: 0.7,
   linkDistance: 60,
   linkOpacity: 0.4,
+  nodeRadius: 7,
 }
 
 const PHYSICS_BOUNDS = {
@@ -16,6 +17,7 @@ const PHYSICS_BOUNDS = {
   linkStrength: { min: 0, max: 2 },
   linkDistance: { min: 20, max: 300 },
   linkOpacity: { min: 0, max: 1 },
+  nodeRadius: { min: 2, max: 20 },
 }
 
 function clampPhysics(params: Partial<PhysicsParams>): Partial<PhysicsParams> {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSettingsStore } from '@/stores/settingsStore'
+import { useSettingsStore, DEFAULT_RESPONSE_INSTRUCTIONS } from '@/stores/settingsStore'
 import { MODEL_OPTIONS, type ProviderId } from '@/lib/modelConfig'
 import { SPEAKER_CONFIG, SPEAKER_IDS } from '@/lib/speakerConfig'
 import type { DirectorId } from '@/types'
@@ -31,7 +31,7 @@ function EnvHint({ provider }: { provider: string }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AITab() {
-  const { personaModels, setPersonaModel, apiKeys, setApiKey } = useSettingsStore()
+  const { personaModels, setPersonaModel, apiKeys, setApiKey, responseInstructions, setResponseInstructions } = useSettingsStore()
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
 
   const toggleKeyVisibility = (id: string) =>
@@ -157,6 +157,53 @@ export default function AITab() {
             )
           })}
         </div>
+      </section>
+
+      <div style={{ borderTop: '1px solid var(--color-border)' }} />
+
+      {/* Response instructions */}
+      <section>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            AI 응답 지침
+          </h3>
+          <button
+            onClick={() => setResponseInstructions(DEFAULT_RESPONSE_INSTRUCTIONS)}
+            className="text-[10px] px-2 py-0.5 rounded"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+            }}
+            title="기본 응답 원칙으로 복원"
+          >
+            기본값 복원
+          </button>
+        </div>
+        <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
+          모든 페르소나에 공통 적용되는 응답 형식·태도 지침입니다. 수정하거나 항목을 추가하세요.
+        </p>
+        <textarea
+          value={responseInstructions}
+          onChange={e => setResponseInstructions(e.target.value)}
+          rows={8}
+          spellCheck={false}
+          style={{
+            width: '100%',
+            background: 'var(--color-bg-surface)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 5,
+            padding: '7px 9px',
+            fontSize: 11,
+            fontFamily: 'ui-monospace, monospace',
+            color: 'var(--color-text-primary)',
+            resize: 'vertical',
+            lineHeight: 1.6,
+            outline: 'none',
+          }}
+          placeholder="예: - 답변은 항상 3줄 이내로 요약해주세요."
+        />
       </section>
     </div>
   )

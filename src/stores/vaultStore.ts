@@ -37,6 +37,8 @@ interface VaultState {
   loadingPhase: string
   /** Runtime: last error message, null if none */
   error: string | null
+  /** Runtime: total MD file count detected at load start (null = not yet known) */
+  pendingFileCount: number | null
 
   setVaultPath: (path: string | null) => void
   setLoadedDocuments: (docs: LoadedDocument[] | null) => void
@@ -48,6 +50,7 @@ interface VaultState {
   setVaultReady: (ready: boolean) => void
   setLoadingProgress: (progress: number, phase?: string) => void
   setError: (error: string | null) => void
+  setPendingFileCount: (count: number | null) => void
   /** Clear vault path + documents + error */
   clearVault: () => void
 }
@@ -65,6 +68,7 @@ export const useVaultStore = create<VaultState>()(
       loadingProgress: 0,
       loadingPhase: '',
       error: null,
+      pendingFileCount: null,
 
       setVaultPath: (vaultPath) => set({ vaultPath }),
       setLoadedDocuments: (loadedDocuments) => set({ loadedDocuments }),
@@ -78,8 +82,9 @@ export const useVaultStore = create<VaultState>()(
       setLoadingProgress: (loadingProgress, loadingPhase = '') =>
         set({ loadingProgress, loadingPhase }),
       setError: (error) => set({ error }),
+      setPendingFileCount: (pendingFileCount) => set({ pendingFileCount }),
       clearVault: () =>
-        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], imagePathRegistry: null, imageDataCache: {}, error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '' }),
+        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], imagePathRegistry: null, imageDataCache: {}, error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '', pendingFileCount: null }),
     }),
     {
       name: 'rembrandt-vault',

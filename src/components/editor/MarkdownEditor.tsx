@@ -156,6 +156,8 @@ export default function MarkdownEditor() {
   const canSave = Boolean(absolutePath && window.vaultAPI)
 
   const [isLocked, setIsLocked] = useState(false)
+  const isLockedRef = useRef(isLocked)
+  isLockedRef.current = isLocked
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [localTags, setLocalTags] = useState<string[]>(doc?.tags ?? [])
   const [isAddingTag, setIsAddingTag] = useState(false)
@@ -329,6 +331,15 @@ export default function MarkdownEditor() {
   const handleLinkClickRef = useRef(handleLinkClick)
   handleLinkClickRef.current = handleLinkClick
 
+  // 잠금 상태에서 ![[image.png]] 클릭 시 이미지 뷰어 열기
+  const handleImageClick = useCallback((ref: string) => {
+    const normalized = ref.toLowerCase().replace(/\s+/g, '_')
+    openInEditor(`img:${normalized}`)
+  }, [openInEditor])
+
+  const handleImageClickRef = useRef(handleImageClick)
+  handleImageClickRef.current = handleImageClick
+
   // ── WikiLink 자동완성 확정 ─────────────────────────────────────────────────
 
   const applyWikiSuggest = useCallback((name: string) => {
@@ -360,7 +371,13 @@ export default function MarkdownEditor() {
     setSaveStatus('idle')
     setWikiSuggestRef.current(null)
 
-    const wikiPlugin = buildWikiLinkPlugin((slug) => handleLinkClickRef.current(slug))
+    const wikiPlugin = buildWikiLinkPlugin(
+      (slug) => handleLinkClickRef.current(slug),
+      {
+        isLockedRef,
+        onImageClick: (ref) => handleImageClickRef.current(ref),
+      },
+    )
 
     const view = new EditorView({
       state: EditorState.create({

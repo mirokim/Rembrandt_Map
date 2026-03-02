@@ -17,6 +17,7 @@ const SLIDERS: SliderDef[] = [
   { key: 'linkStrength',label: 'Link',      min: 0,     max: 2,   step: 0.01 },
   { key: 'linkDistance',label: 'Distance',  min: 20,    max: 300, step: 5    },
   { key: 'linkOpacity', label: 'Wire',      min: 0,     max: 1,   step: 0.01 },
+  { key: 'nodeRadius',  label: 'Node Size', min: 2,     max: 20,  step: 0.5  },
 ]
 
 export default function PhysicsControls() {
@@ -143,7 +144,11 @@ export default function PhysicsControls() {
                     color: 'var(--color-text-muted)',
                   }}
                 >
-                  {key === 'charge' ? physics[key].toFixed(0) : physics[key].toFixed(2)}
+                  {key === 'charge'
+                    ? physics[key].toFixed(0)
+                    : key === 'nodeRadius' || key === 'linkDistance'
+                      ? physics[key].toFixed(1)
+                      : physics[key].toFixed(2)}
                 </span>
               </div>
             ))}
