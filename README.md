@@ -40,17 +40,22 @@ AI 컨텍스트 수집
 ## 주요 기능
 
 ### 지식 그래프 시각화
-- **2D 그래프**: d3-force 물리 시뮬레이션 기반 인터랙티브 그래프
+- **2D 그래프**: d3-force 물리 시뮬레이션 기반 인터랙티브 그래프 (Canvas 렌더링)
 - **3D 그래프**: Three.js + d3-force-3d 기반 입체 그래프
 - **노드 색상 모드**: 문서 유형 / 담당자(speaker) / 폴더 / 태그 / 주제별 색상 구분
 - **팬텀 노드**: 링크 대상이 아직 없는 위키링크도 그래프에 표시 (Obsidian 동작 동일)
+- **AI 노드 하이라이트**: AI 답변에서 언급된 문서를 그래프에서 자동 하이라이트
+- **노드 라벨 토글**: 상단 바에서 전체 노드 라벨 표시/숨기기 전환
+- **Fast Mode**: 2D 강제 전환 + 호버 스킵 + 동기 물리 틱으로 대용량 볼트에서도 부드러운 렌더링
 
 ### Graph-Augmented RAG (그래프 증강 검색)
 - **TF-IDF 벡터 검색**: 볼트 로드 시 자동 인덱싱, 의미적 유사도로 관련 문서 검색
+- **IndexedDB 캐싱**: 볼트 재오픈 시 TF-IDF 인덱스를 캐시에서 복원 (파일 변경 없으면 재계산 없음)
 - **패시지-레벨 검색**: 쿼리와 가장 관련된 섹션만 선택 (문서 앞부분 고정 방식 탈피)
 - **BFS 그래프 탐색**: 위키링크를 따라 최대 4홉까지 관련 문서 자동 수집
 - **PageRank 기반 허브 시드**: 연결도가 높은 허브 노드를 탐색 시작점으로 자동 보완
 - **전체 탐색 모드**: "전체 프로젝트 인사이트" 등 광범위한 쿼리에 자동 전환
+- **최근 문서 우선 정렬**: RAG 결과에서 최근 수정된 문서를 우선 반영, 날짜 레이블 표시
 - **묵시적 연결 발견**: WikiLink 없이도 TF-IDF 유사도가 높은 숨겨진 연관 문서 쌍 감지
 - **클러스터 주제 레이블**: 각 클러스터의 TF-IDF 상위 키워드 자동 추출
 - **브릿지 노드 탐지**: 여러 클러스터를 연결하는 아키텍처 핵심 문서 감지
@@ -59,6 +64,8 @@ AI 컨텍스트 수집
 - **노드 선택 분석**: 특정 문서 선택 후 해당 노드와 연결된 모든 문서를 AI가 분석
 - **전체 분석**: 노드 선택 없이도 전체 프로젝트를 허브 기반으로 분석
 - **멀티패스 UI**: "탐색 중 → 분석 중" 단계별 진행 표시
+- **QuickQuestions**: 페르소나별 100개 풀에서 랜덤 추천 질문 제공
+- **currentSituation 컨텍스트**: 현재 상황/이슈를 설정해두면 모든 AI 프롬프트에 자동 주입 (실세계 컨텍스트 연결)
 
 ### 다중 LLM 페르소나
 - 5명의 디렉터 페르소나 (총괄 / 아트 / 기획 / 레벨 / 프로그램)
@@ -74,8 +81,10 @@ AI 컨텍스트 수집
 - 1.2초 자동 저장
 
 ### 토론 모드
-- 여러 AI 페르소나가 특정 주제를 두고 라운드로빈 / 자유 토론 / 배틀 방식으로 토론
-- 실시간 스트리밍 표시
+- 5명의 디렉터 페르소나 중 선택하여 특정 주제를 두고 토론 (라운드로빈 / 자유 토론 / 역할 배정 / 결전모드)
+- **페르소나 기반 참여자**: 동일한 API 키로 여러 페르소나가 동시 참여 가능 (ex. Anthropic 키 하나로 Chief + Prog 토론)
+- AI 설정에서 API 키가 설정된 페르소나만 참여 후보로 표시
+- 참고 자료 첨부 (텍스트 / 이미지 / PDF), 실시간 스트리밍 표시
 
 ### 파일 트리
 - 폴더 / 담당자 / 태그별 분류 표시
@@ -163,10 +172,20 @@ TF-IDF    = TF × IDF
 - 볼트 로드 시 `setTimeout(0)`으로 백그라운드 인덱싱 (UI 블로킹 없음)
 - 한국어 조사 제거(형태소 처리): "스칼렛이라는" → "스칼렛"
 - OOV(Out-of-Vocabulary) 단어: `IDF = log(2)` 폴백
+- **IndexedDB 캐싱**: 파일 mtime 기반 지문(fingerprint)으로 캐시 유효성 검사 → 재오픈 시 ms 단위 복원
 
 ```typescript
-// 볼트 로드 완료 후 자동 빌드
-setTimeout(() => { tfidfIndex.build(docs) }, 0)
+// 볼트 로드 완료 후 — 캐시 히트 시 복원, 미스 시 빌드 후 저장
+const fingerprint = buildFingerprint(docs)  // "id1:mtime1|id2:mtime2|..."
+setTimeout(async () => {
+  const cached = await loadTfIdfCache(dirPath, fingerprint)
+  if (cached) {
+    tfidfIndex.restore(cached)              // IndexedDB에서 즉시 복원
+  } else {
+    tfidfIndex.build(docs)                  // 최초 빌드
+    void saveTfIdfCache(dirPath, tfidfIndex.serialize(fingerprint))
+  }
+}, 0)
 
 // 검색 사용 예시
 const results = tfidfIndex.search("전투 밸런싱", 8)
@@ -458,12 +477,18 @@ AI 구조 헤더: "클러스터 1 [전투/스킬/밸런스] (12개): ..."
 
 ```
 .md 파일 로드
-  → markdownParser.ts (YAML 프론트매터 + WikiLink 파싱)
+  → markdownParser.ts (YAML 프론트매터 + WikiLink 파싱, 비동기 청크 처리)
   → LoadedDocument[]
   → buildGraph() → GraphNode[] + GraphLink[]
-  → tfidfIndex.build() (백그라운드)
   → graphStore / vaultStore 저장
-  → 2D/3D 그래프 렌더링
+  → 2D/3D 그래프 렌더링 (Canvas)
+
+  [백그라운드, setTimeout(0)]
+  → buildFingerprint(docs) → 지문 생성
+  → loadTfIdfCache(vaultPath, fingerprint)
+      ├─ 캐시 히트: tfidfIndex.restore(cached)  ← ms 단위 복원
+      └─ 캐시 미스: tfidfIndex.build(docs) → saveTfIdfCache(...)
+  → findImplicitLinks(adjacency)  ← 묵시적 연결 사전 계산
 ```
 
 ---
@@ -583,14 +608,17 @@ type: design              # 문서 유형
 
 ## LLM 설정
 
-설정 패널 (상단 설정 버튼) → API 키 입력:
+설정 패널 (상단 설정 버튼) → API 키 입력 → 페르소나별 모델 선택:
 
-| 제공자 | 모델 예시 | 이미지 지원 |
+| 제공자 | 지원 모델 | 이미지 지원 |
 |--------|---------|-----------|
-| Anthropic | claude-opus-4-6, claude-sonnet-4-6 | ✅ |
-| OpenAI | gpt-4o, gpt-4o-mini | ✅ |
-| Google Gemini | gemini-1.5-pro | ✅ |
-| xAI Grok | grok-beta | ❌ |
+| Anthropic | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5 | ✅ |
+| OpenAI | gpt-4.1, gpt-4.1-mini, gpt-4o, o3, o4-mini | ✅ |
+| Google Gemini | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash | ✅ |
+| xAI Grok | grok-3, grok-3-mini, grok-3-fast | ❌ |
+
+**페르소나별 모델 독립 설정**: 각 디렉터 페르소나마다 다른 모델을 지정할 수 있습니다.
+동일한 API 키로 여러 페르소나에게 서로 다른 모델을 할당하거나, 토론 모드에서 같은 제공자로 여러 참여자를 구성할 수 있습니다.
 
 ---
 
@@ -599,33 +627,40 @@ type: design              # 문서 유형
 ```
 src/
 ├── components/
-│   ├── chat/           # 채팅 패널 + 토론 모드
+│   ├── chat/           # 채팅 패널 + 토론 모드 (DebateEngine, QuickQuestions)
 │   ├── editor/         # CodeMirror 마크다운 에디터
 │   ├── fileTree/       # 파일 트리 + 컨텍스트 메뉴
-│   ├── graph/          # Graph2D, Graph3D, GraphPanel (AI 분석)
-│   ├── layout/         # 메인 레이아웃 + 상단 바
-│   └── settings/       # 설정 모달
+│   ├── graph/          # Graph2D (Canvas), Graph3D, GraphPanel (AI 분석)
+│   ├── layout/         # 메인 레이아웃 + 상단 바 (노드 라벨 토글)
+│   └── settings/       # 설정 모달 (페르소나별 모델 + currentSituation)
 │
 ├── lib/
-│   ├── graphAnalysis.ts    # TF-IDF + PageRank + 클러스터링
-│   ├── graphRAG.ts         # Graph-Augmented RAG 파이프라인
+│   ├── graphAnalysis.ts    # TF-IDF + PageRank + 클러스터링 + serialize/restore
+│   ├── graphRAG.ts         # Graph-Augmented RAG 파이프라인 + 최근성 정렬
 │   ├── graphBuilder.ts     # 노드/링크 생성 (팬텀 노드 포함)
-│   ├── markdownParser.ts   # YAML 프론트매터 + WikiLink 파싱
+│   ├── markdownParser.ts   # YAML 프론트매터 + WikiLink 파싱 (비동기 청크)
+│   ├── tfidfCache.ts       # IndexedDB TF-IDF 캐시 (저장/복원/지문 검증)
+│   ├── speakerConfig.ts    # 페르소나 ID + 라벨 + 색상 중앙 설정
+│   ├── modelConfig.ts      # 모델 → 제공자 매핑 + 모델 목록
+│   ├── personaVaultConfig.ts # 볼트 내 .rembrant/personas.md 파싱
 │   └── nodeColors.ts       # 해시 기반 결정론적 노드 색상
 │
 ├── services/
+│   ├── debateEngine.ts     # 토론 모드 엔진 (페르소나 기반 참여자)
+│   ├── debateRoles.ts      # 토론 역할 + 라벨/색상 설정
 │   ├── llmClient.ts        # 다중 LLM 통합 인터페이스
 │   └── providers/          # Anthropic / OpenAI / Gemini / Grok
 │
 ├── stores/
 │   ├── graphStore.ts       # 노드/링크/선택 상태
 │   ├── vaultStore.ts       # 로드된 문서 리스트
-│   ├── settingsStore.ts    # API 키 + 볼트 경로 (persist)
+│   ├── settingsStore.ts    # API 키 + 페르소나 모델 + currentSituation (persist)
+│   ├── backendStore.ts     # Python 백엔드 상태
 │   └── uiStore.ts          # 테마 + 탭 + 편집 문서
 │
 └── hooks/
-    ├── useVaultLoader.ts       # 볼트 로드 + TF-IDF 빌드
-    ├── useGraphSimulation.ts   # 2D d3-force 시뮬레이션
+    ├── useVaultLoader.ts       # 볼트 로드 + TF-IDF 캐시 통합
+    ├── useGraphSimulation.ts   # 2D d3-force 시뮬레이션 (Canvas + Fast Mode)
     └── useGraphSimulation3D.ts # 3D 물리 시뮬레이션
 ```
 
