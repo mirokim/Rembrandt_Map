@@ -13,7 +13,7 @@ import { useGraphSimulation3D, type SimNode3D, type SimLink3D } from '@/hooks/us
 import { useFrameRate } from '@/hooks/useFrameRate'
 import { graphCallbacks } from '@/lib/graphEvents'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor } from '@/lib/nodeColors'
 import type { GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -102,7 +102,10 @@ export default function Graph3D({ width, height }: Props) {
       const mesh = meshMap.get(node.id)
       if (mesh) {
         const mat = mesh.material as THREE.MeshBasicMaterial
-        mat.color.set(getNodeColor(node, nodeColorMode, nodeColorMap))
+        const baseColor = getNodeColor(node, nodeColorMode, nodeColorMap)
+        const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
+        const lightFactor = (1 - sf) * 0.55
+        mat.color.set(lightFactor > 0.01 ? lightenColor(baseColor, lightFactor) : baseColor)
       }
     })
   }, [nodes, nodeColorMode, nodeColorMap])
@@ -228,9 +231,11 @@ export default function Graph3D({ width, height }: Props) {
       const deg3d = degMap.get(node.id) ?? 0
       const sf3d = 0.55 + Math.sqrt((deg3d + 1) / (maxDeg3D + 1)) * 0.45
       const baseScale = nodeRadiusRef.current / 7
-      // transparent: true so we can dim opacity for non-neighbors
-      const opacity = 0.35 + sf3d * 0.65
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity })
+      // Lighten low-degree nodes toward white; opaque = no sorting overhead
+      const lightFactor = (1 - sf3d) * 0.55
+      const finalColor = lightFactor > 0.01 ? lightenColor(color, lightFactor) : color
+      // transparent: true only for hover-neighbor dimming (overridden during hover)
+      const mat = new THREE.MeshBasicMaterial({ color: finalColor, transparent: true, opacity: 1.0 })
       const mesh = new THREE.Mesh(node.isImage ? octaGeo : sphereGeo, mat)
       mesh.scale.setScalar(baseScale * sf3d)
       mesh.userData.nodeId = node.id

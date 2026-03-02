@@ -3,7 +3,7 @@ import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
-import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor } from '@/lib/nodeColors'
 import type { GraphNode } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -127,10 +127,11 @@ export default function Graph2DCanvas({ width, height }: Props) {
       const sizeScale = 0.55 + scaleFactor * 0.45
       const nr = baseNr * sizeScale
 
-      // Opacity: low-degree nodes are muted (min 0.35 → max 1.0)
-      const opacityScale = 0.35 + scaleFactor * 0.65
-      ctx.globalAlpha = isSelected ? 1 : opacityScale
-      ctx.fillStyle = color
+      // Brightness: low-degree nodes get white mixed in (max 55% white → 0% white)
+      // Selected node always shows original color
+      const lightFactor = isSelected ? 0 : (1 - scaleFactor) * 0.55
+      ctx.globalAlpha = isSelected ? 1 : 0.9
+      ctx.fillStyle = lightFactor > 0 ? lightenColor(color, lightFactor) : color
 
       if (nodeData.isImage) {
         // 이미지 노드: 다이아몬드(마름모) 형태

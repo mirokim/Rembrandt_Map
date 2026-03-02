@@ -209,3 +209,21 @@ export function buildNodeColorMap(
   }
   return new Map()
 }
+
+/**
+ * Lighten a hex color toward white by `factor` (0 = original, 1 = white).
+ * Used for degree-proportional node brightness: low-degree nodes get more white mixed in.
+ * Returns a CSS `rgb(...)` string. Supports both #rrggbb and #rgb formats.
+ */
+export function lightenColor(hex: string, factor: number): string {
+  if (factor <= 0) return hex
+  const h = hex.replace('#', '')
+  const full = h.length === 3
+    ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+    : h
+  const r = parseInt(full.slice(0, 2), 16)
+  const g = parseInt(full.slice(2, 4), 16)
+  const b = parseInt(full.slice(4, 6), 16)
+  const f = Math.min(1, Math.max(0, factor))
+  return `rgb(${Math.round(r + (255 - r) * f)},${Math.round(g + (255 - g) * f)},${Math.round(b + (255 - b) * f)})`
+}
