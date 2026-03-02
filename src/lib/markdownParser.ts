@@ -8,7 +8,7 @@
 import matter from 'gray-matter'
 import type { VaultFile, LoadedDocument, DocSection, SpeakerId } from '@/types'
 import { logger } from '@/lib/logger'
-import { slugify, extractWikiLinks } from '@/lib/utils'
+import { slugify, extractWikiLinks, extractImageRefs } from '@/lib/utils'
 
 // ── Valid speaker IDs for validation ──────────────────────────────────────────
 
@@ -157,6 +157,18 @@ export function parseMarkdownFile(file: VaultFile): LoadedDocument {
   const pathParts = file.relativePath.split(/[\\/]/)
   const folderPath = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : ''
 
+  // Collect ![[image.png]] refs from all sections
+  const allImageRefs = new Set<string>()
+  for (const section of sections) {
+    for (const ref of extractImageRefs(section.body)) {
+      allImageRefs.add(ref)
+    }
+  }
+  // Also check frontmatter body (before sections) in raw content
+  for (const ref of extractImageRefs(body)) {
+    allImageRefs.add(ref)
+  }
+
   return {
     id: docId,
     filename: pathParts[pathParts.length - 1] ?? file.relativePath,
@@ -169,6 +181,7 @@ export function parseMarkdownFile(file: VaultFile): LoadedDocument {
     links,
     sections,
     rawContent: file.content,
+    imageRefs: allImageRefs.size > 0 ? [...allImageRefs] : undefined,
   }
 }
 

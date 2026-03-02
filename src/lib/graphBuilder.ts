@@ -131,6 +131,49 @@ export function buildGraphLinks(
   return { links, phantomNodes: Array.from(phantomNodes.values()) }
 }
 
+// ── buildImageNodes ───────────────────────────────────────────────────────────
+
+/**
+ * Create image nodes from ![[image.png]] refs found in LoadedDocument.imageRefs.
+ * - 동일 이미지를 여러 문서가 참조해도 노드는 1개만 생성 (공유)
+ * - ID 형식: `img:{normalised_filename}` (e.g. "img:screenshot.png")
+ */
+function buildImageNodes(
+  documents: AnyDocument[],
+): { imageNodes: GraphNode[]; imageLinks: GraphLink[] } {
+  const imageNodeMap = new Map<string, GraphNode>()
+  const imageLinks: GraphLink[] = []
+  const seen = new Set<string>()
+
+  for (const doc of documents) {
+    const refs = (doc as LoadedDocument).imageRefs
+    if (!refs?.length) continue
+
+    for (const ref of refs) {
+      const imageId = `img:${ref.toLowerCase().replace(/\s+/g, '_')}`
+
+      if (!imageNodeMap.has(imageId)) {
+        imageNodeMap.set(imageId, {
+          id: imageId,
+          docId: imageId,
+          speaker: 'unknown' as SpeakerId,
+          label: truncate(ref.replace(/\.[^.]+$/, ''), 36), // 확장자 제거 후 표시
+          isImage: true,
+        })
+      }
+
+      // 중복 엣지 방지 (같은 문서가 같은 이미지를 여러 번 참조할 경우)
+      const edgeKey = `${doc.id}→${imageId}`
+      if (!seen.has(edgeKey)) {
+        seen.add(edgeKey)
+        imageLinks.push({ source: doc.id, target: imageId, strength: 0.3 })
+      }
+    }
+  }
+
+  return { imageNodes: [...imageNodeMap.values()], imageLinks }
+}
+
 // ── buildGraph ────────────────────────────────────────────────────────────────
 
 /** Convenience: build both nodes and links in one call */
@@ -139,5 +182,9 @@ export function buildGraph(
 ): { nodes: GraphNode[]; links: GraphLink[] } {
   const docNodes = buildGraphNodes(documents)
   const { links, phantomNodes } = buildGraphLinks(documents, docNodes)
-  return { nodes: [...docNodes, ...phantomNodes], links }
+  const { imageNodes, imageLinks } = buildImageNodes(documents)
+  return {
+    nodes: [...docNodes, ...phantomNodes, ...imageNodes],
+    links: [...links, ...imageLinks],
+  }
 }

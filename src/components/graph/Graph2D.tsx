@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useLayoutEffect, useMemo } from 'react'
+import { useRef, useState, useCallback, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -31,7 +31,8 @@ export default function Graph2D({ width, height }: Props) {
   )
 
   // DOM refs — updated imperatively in simulation tick (avoids React re-render per frame)
-  const nodeEls = useRef<Map<string, SVGCircleElement>>(new Map())
+  // SVGCircleElement (doc nodes) or SVGRectElement (image nodes)
+  const nodeEls = useRef<Map<string, SVGCircleElement | SVGRectElement>>(new Map())
   const labelEls = useRef<Map<string, SVGTextElement>>(new Map())
   const linkEls = useRef<Map<number, SVGLineElement>>(new Map())
   const selRingEl = useRef<SVGCircleElement | null>(null)
@@ -66,8 +67,16 @@ export default function Graph2D({ width, height }: Props) {
     for (const node of simNodes) {
       const el = nodeEls.current.get(node.id)
       if (el) {
-        el.setAttribute('cx', String(node.x))
-        el.setAttribute('cy', String(node.y))
+        if (el.tagName.toLowerCase() === 'rect') {
+          // 이미지 노드(rect): x/y를 중심 기준으로 업데이트 + rotate transform
+          const halfW = parseFloat(el.getAttribute('width') ?? '12') / 2
+          el.setAttribute('x', String(node.x - halfW))
+          el.setAttribute('y', String(node.y - halfW))
+          el.setAttribute('transform', `rotate(45, ${node.x}, ${node.y})`)
+        } else {
+          el.setAttribute('cx', String(node.x))
+          el.setAttribute('cy', String(node.y))
+        }
       }
       const lEl = labelEls.current.get(node.id)
       if (lEl) {
@@ -500,25 +509,41 @@ export default function Graph2D({ width, height }: Props) {
             {nodes.map(node => {
               const color = getNodeColor(node, nodeColorMode, nodeColorMap)
               const isSelected = selectedNodeId === node.id
+              const commonProps = {
+                key: node.id,
+                fill: color,
+                fillOpacity: isSelected ? 1 : 0.82,
+                style: {
+                  cursor: 'grab',
+                  filter: isSelected ? `drop-shadow(0 0 6px ${color})` : undefined,
+                  transition: isFast ? undefined : 'r 0.15s, fill-opacity 0.15s',
+                } as CSSProperties,
+                onClick: () => handleNodeClick(node.id),
+                onDoubleClick: () => handleNodeDoubleClick(node.id, node.docId),
+                onMouseDown: (e: React.MouseEvent) => handleNodeMouseDown(node.id, e),
+                onMouseEnter: () => handleMouseEnter(node.id),
+                onMouseLeave: handleMouseLeave,
+                'data-node-id': node.id,
+              }
+              if (node.isImage) {
+                // 이미지 노드: 다이아몬드(마름모) — rect를 45도 회전
+                const s = isSelected ? 4.5 : 3
+                return (
+                  <rect
+                    ref={el => { if (el) nodeEls.current.set(node.id, el) }}
+                    x={width / 2 - s} y={height / 2 - s}
+                    width={s * 2} height={s * 2}
+                    transform={`rotate(45, ${width / 2}, ${height / 2})`}
+                    {...commonProps}
+                  />
+                )
+              }
               return (
                 <circle
-                  key={node.id}
                   ref={el => { if (el) nodeEls.current.set(node.id, el) }}
                   cx={width / 2} cy={height / 2}
                   r={isSelected ? 3.5 : 2}
-                  fill={color}
-                  fillOpacity={isSelected ? 1 : 0.82}
-                  style={{
-                    cursor: 'grab',
-                    filter: isSelected ? `drop-shadow(0 0 6px ${color})` : undefined,
-                    transition: isFast ? undefined : 'r 0.15s, fill-opacity 0.15s',
-                  }}
-                  onClick={() => handleNodeClick(node.id)}
-                  onDoubleClick={() => handleNodeDoubleClick(node.id, node.docId)}
-                  onMouseDown={e => handleNodeMouseDown(node.id, e)}
-                  onMouseEnter={() => handleMouseEnter(node.id)}
-                  onMouseLeave={handleMouseLeave}
-                  data-node-id={node.id}
+                  {...commonProps}
                 />
               )
             })}

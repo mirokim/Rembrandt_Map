@@ -105,11 +105,17 @@ function speakerHex(node: GraphNode): string {
   return '#' + n.toString(16).padStart(6, '0')
 }
 
+/** 이미지 노드 고정 색상 — 모든 colorMode에서 동일하게 적용 */
+const IMAGE_NODE_COLOR = '#a78bfa' // violet-400
+
 export function getNodeColor(
   node: GraphNode,
   mode: NodeColorMode,
   colorMap: Map<string, string>,
 ): string {
+  // 이미지 노드는 colorMode 무관하게 고정 보라색
+  if (node.isImage) return IMAGE_NODE_COLOR
+
   if (mode === 'document') {
     return colorMap.get(node.docId) ?? speakerHex(node)
   }

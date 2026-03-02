@@ -47,6 +47,8 @@ export interface GraphNode {
   folderPath?: string
   /** Tags from frontmatter (for tag color mode) */
   tags?: string[]
+  /** True for image nodes created from ![[...]] embeds */
+  isImage?: boolean
   // d3-force mutable position fields
   x?: number
   y?: number
@@ -138,6 +140,8 @@ export interface LoadedDocument {
   links: string[]
   sections: DocSection[]
   rawContent: string
+  /** Image filenames referenced via ![[image.png]] embeds in this document */
+  imageRefs?: string[]
 }
 
 // ── Backend / RAG types (Phase 1-3) ──────────────────────────────────────────

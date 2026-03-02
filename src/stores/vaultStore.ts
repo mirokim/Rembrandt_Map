@@ -13,6 +13,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { LoadedDocument } from '@/types'
 
+/** 이미지 파일 경로 레지스트리: filename → { relativePath, absolutePath } */
+export type ImagePathRegistry = Record<string, { relativePath: string; absolutePath: string }>
+
 interface VaultState {
   /** Persisted: absolute path to the selected vault root */
   vaultPath: string | null
@@ -20,6 +23,8 @@ interface VaultState {
   loadedDocuments: LoadedDocument[] | null
   /** Runtime: all known subfolder paths in the vault (relative to vault root) */
   vaultFolders: string[]
+  /** Runtime: image filename → path lookup table (from vault load) */
+  imagePathRegistry: ImagePathRegistry | null
   /** Runtime: true while loading/parsing files */
   isLoading: boolean
   /** Runtime: true after the first load attempt completes (success or failure) */
@@ -34,6 +39,7 @@ interface VaultState {
   setVaultPath: (path: string | null) => void
   setLoadedDocuments: (docs: LoadedDocument[] | null) => void
   setVaultFolders: (folders: string[]) => void
+  setImagePathRegistry: (registry: ImagePathRegistry | null) => void
   setIsLoading: (loading: boolean) => void
   setVaultReady: (ready: boolean) => void
   setLoadingProgress: (progress: number, phase?: string) => void
@@ -48,6 +54,7 @@ export const useVaultStore = create<VaultState>()(
       vaultPath: null,
       loadedDocuments: null,
       vaultFolders: [],
+      imagePathRegistry: null,
       isLoading: false,
       vaultReady: false,
       loadingProgress: 0,
@@ -57,13 +64,14 @@ export const useVaultStore = create<VaultState>()(
       setVaultPath: (vaultPath) => set({ vaultPath }),
       setLoadedDocuments: (loadedDocuments) => set({ loadedDocuments }),
       setVaultFolders: (vaultFolders) => set({ vaultFolders }),
+      setImagePathRegistry: (imagePathRegistry) => set({ imagePathRegistry }),
       setIsLoading: (isLoading) => set({ isLoading }),
       setVaultReady: (vaultReady) => set({ vaultReady }),
       setLoadingProgress: (loadingProgress, loadingPhase = '') =>
         set({ loadingProgress, loadingPhase }),
       setError: (error) => set({ error }),
       clearVault: () =>
-        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '' }),
+        set({ vaultPath: null, loadedDocuments: null, vaultFolders: [], imagePathRegistry: null, error: null, isLoading: false, vaultReady: false, loadingProgress: 0, loadingPhase: '' }),
     }),
     {
       name: 'rembrandt-vault',

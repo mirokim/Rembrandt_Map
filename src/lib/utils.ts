@@ -23,8 +23,16 @@ export function truncate(text: string, max = 40): string {
   return text.slice(0, max - 1) + '…'
 }
 
-/** Extract [[slug]] references from a markdown string */
+/** Extract [[slug]] references from a markdown string.
+ *  ![[embed]] 형식의 이미지 임베드는 제외합니다. */
 export function extractWikiLinks(text: string): string[] {
-  const matches = text.match(/\[\[([^\]]+)\]\]/g) ?? []
+  // negative lookbehind: '!' 바로 앞에 오는 [[...]] 는 이미지 임베드이므로 제외
+  const matches = text.match(/(?<!!)\[\[([^\]]+)\]\]/g) ?? []
   return matches.map(m => m.slice(2, -2).trim())
+}
+
+/** Extract ![[image.png]] image embed references from a markdown string. */
+export function extractImageRefs(text: string): string[] {
+  const matches = text.match(/!\[\[([^\]]+)\]\]/g) ?? []
+  return [...new Set(matches.map(m => m.slice(3, -2).trim()))]
 }

@@ -20,7 +20,11 @@ declare global {
     // ── vaultAPI (Phase 6) ────────────────────────────────────────────────────
     vaultAPI?: {
       selectFolder(): Promise<string | null>
-      loadFiles(dirPath: string): Promise<{ files: VaultFile[]; folders: string[] }>
+      loadFiles(dirPath: string): Promise<{
+        files: VaultFile[]
+        folders: string[]
+        imageRegistry?: Record<string, { relativePath: string; absolutePath: string }>
+      }>
       watchStart(dirPath: string): Promise<boolean>
       watchStop(): Promise<boolean>
       onChanged(callback: (data: { vaultPath: string }) => void): () => void
@@ -28,6 +32,8 @@ declare global {
       renameFile(absolutePath: string, newFilename: string): Promise<{ success: boolean; newPath: string }>
       deleteFile(absolutePath: string): Promise<{ success: boolean }>
       readFile(filePath: string): Promise<string | null>
+      /** Read an image file as base64 data URL; returns null if not found or outside vault */
+      readImage(filePath: string): Promise<string | null>
       createFolder(folderPath: string): Promise<{ success: boolean; path: string }>
       moveFile(absolutePath: string, destFolderPath: string): Promise<{ success: boolean; newPath: string }>
     }

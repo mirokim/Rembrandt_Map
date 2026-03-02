@@ -103,9 +103,22 @@ export default function Graph2DCanvas({ width, height }: Props) {
       const isSelected = simNode.id === selId
       ctx.globalAlpha = isSelected ? 1 : 0.82
       ctx.fillStyle = color
-      ctx.beginPath()
-      ctx.arc(simNode.x, simNode.y, isSelected ? 10 : 7, 0, Math.PI * 2)
-      ctx.fill()
+
+      if (nodeData.isImage) {
+        // 이미지 노드: 다이아몬드(마름모) 형태
+        const r = isSelected ? 9 : 6
+        ctx.save()
+        ctx.translate(simNode.x, simNode.y)
+        ctx.rotate(Math.PI / 4)
+        ctx.beginPath()
+        ctx.rect(-r / 1.41, -r / 1.41, r * 1.41, r * 1.41)
+        ctx.fill()
+        ctx.restore()
+      } else {
+        ctx.beginPath()
+        ctx.arc(simNode.x, simNode.y, isSelected ? 10 : 7, 0, Math.PI * 2)
+        ctx.fill()
+      }
     }
 
     // ── Selection ring (on top of nodes) ────────────────────────────────────

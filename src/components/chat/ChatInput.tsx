@@ -1,6 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { Send, Paperclip, Swords, X } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
+import { useGraphStore } from '@/stores/graphStore'
+import { useVaultStore } from '@/stores/vaultStore'
 import { generateId } from '@/lib/utils'
 import type { Attachment } from '@/types'
 
@@ -65,12 +67,51 @@ export default function ChatInput({ debateMode, onToggleDebate }: ChatInputProps
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // 선택된 문서의 imageRefs 감지 — 자동 이미지 첨부용
+  const selectedNodeId = useGraphStore(s => s.selectedNodeId)
+  const loadedDocuments = useVaultStore(s => s.loadedDocuments)
+  const imagePathRegistry = useVaultStore(s => s.imagePathRegistry)
+
+  const selectedDocImageRefs = useMemo(() => {
+    if (!selectedNodeId || !loadedDocuments || !imagePathRegistry) return []
+    const doc = loadedDocuments.find(d => d.id === selectedNodeId)
+    if (!doc?.imageRefs?.length) return []
+    // 실제로 레지스트리에 있는 이미지만 반환
+    return doc.imageRefs.filter(ref => !!imagePathRegistry[ref])
+  }, [selectedNodeId, loadedDocuments, imagePathRegistry])
+
   const canSend = (text.trim().length > 0 || attachments.length > 0) && !isLoading
 
   const handleSend = async () => {
     if (!canSend) return
     const currentText = text.trim()
-    const currentAttachments = attachments.length > 0 ? attachments : undefined
+
+    // 볼트 이미지 자동 로드 (선택된 문서에 ![[...]] 이미지 refs가 있을 때)
+    const autoAttachments: Attachment[] = []
+    if (selectedDocImageRefs.length > 0 && window.vaultAPI?.readImage) {
+      for (const ref of selectedDocImageRefs) {
+        const entry = imagePathRegistry?.[ref]
+        if (!entry) continue
+        try {
+          const dataUrl = await window.vaultAPI.readImage(entry.absolutePath)
+          if (!dataUrl) continue
+          const mimeType = dataUrl.split(';')[0]?.split(':')[1] ?? 'image/png'
+          autoAttachments.push({
+            id: `vault-img-${ref}`,
+            name: ref,
+            type: 'image',
+            mimeType,
+            dataUrl,
+            size: 0,
+          })
+        } catch {
+          // 개별 이미지 로드 실패는 무시
+        }
+      }
+    }
+
+    const combined = [...autoAttachments, ...attachments]
+    const currentAttachments = combined.length > 0 ? combined : undefined
     setText('')
     setAttachments([])
     await sendMessage(currentText, currentAttachments)
@@ -154,6 +195,17 @@ export default function ChatInput({ debateMode, onToggleDebate }: ChatInputProps
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 볼트 이미지 자동 첨부 배지 */}
+      {selectedDocImageRefs.length > 0 && (
+        <div
+          className="flex items-center gap-1.5 text-xs px-2 py-1 rounded"
+          style={{ color: 'var(--color-text-muted)', background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)' }}
+        >
+          <span>🖼️</span>
+          <span>{selectedDocImageRefs.length}개 이미지 자동 첨부</span>
         </div>
       )}
 

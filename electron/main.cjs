@@ -82,25 +82,30 @@ function isInsideVault(vaultPath, filePath) {
   return !rel.startsWith('..') && !path.isAbsolute(rel)
 }
 
+/** 볼트 내 이미지 파일로 인정하는 확장자 */
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i
+
 /**
- * Recursively collect all .md files AND subdirectory paths in dirPath.
+ * Recursively collect all .md files, image files, AND subdirectory paths in dirPath.
  * - Skips hidden dirs/files (starting with '.')
  * - Stops at depth > 10
- * Returns { files: string[], folders: string[] }
+ * Returns { files: string[], folders: string[], images: string[] }
  *   files:   absolute paths to .md files
  *   folders: vault-relative paths to subdirectories (e.g. "미니언 시스템")
+ *   images:  absolute paths to image files (경로만, 내용 읽지 않음)
  */
 function collectVaultContents(vaultPath, dirPath, depth) {
   if (depth === undefined) depth = 0
-  if (depth > 10) return { files: [], folders: [] }
+  if (depth > 10) return { files: [], folders: [], images: [] }
   const files = []
   const folders = []
+  const images = []
   let entries
   try {
     entries = fs.readdirSync(dirPath, { withFileTypes: true })
   } catch (err) {
     console.warn('[vault] readdirSync failed for', dirPath, err.message)
-    return { files: [], folders: [] }
+    return { files: [], folders: [], images: [] }
   }
 
   for (const entry of entries) {
@@ -120,10 +125,16 @@ function collectVaultContents(vaultPath, dirPath, depth) {
       continue
     }
 
-    // 2) Skip obvious non-directory files (have a file extension)
+    // 2) If name is an image → collect path only (no content read)
+    if (IMAGE_EXTENSIONS.test(entry.name) && isInsideVault(vaultPath, fullPath)) {
+      images.push(fullPath)
+      continue
+    }
+
+    // 3) Skip other non-directory files (have a file extension)
     if (/\.\w{1,10}$/.test(entry.name)) continue
 
-    // 3) Remaining entries (no extension) — try to recurse as directory.
+    // 4) Remaining entries (no extension) — try to recurse as directory.
     //    readdirSync will throw if it's not a readable directory → caught below.
     try {
       const relPath = path.relative(vaultPath, fullPath).replace(/\\/g, '/')
@@ -131,11 +142,12 @@ function collectVaultContents(vaultPath, dirPath, depth) {
       const sub = collectVaultContents(vaultPath, fullPath, depth + 1)
       files.push(...sub.files)
       folders.push(...sub.folders)
+      images.push(...sub.images)
     } catch {
       // Not a directory or not readable — skip silently
     }
   }
-  return { files, folders }
+  return { files, folders, images }
 }
 
 // ── Register IPC handlers ─────────────────────────────────────────────────────
@@ -163,8 +175,8 @@ function registerVaultIpcHandlers() {
     }
 
     currentVaultPath = resolvedVault
-    const { files: filePaths, folders: folderRelPaths } = collectVaultContents(resolvedVault, resolvedVault)
-    console.log(`[vault] ${filePaths.length}개 .md 파일, ${folderRelPaths.length}개 폴더 발견 (${resolvedVault})`)
+    const { files: filePaths, folders: folderRelPaths, images: imagePaths } = collectVaultContents(resolvedVault, resolvedVault)
+    console.log(`[vault] ${filePaths.length}개 .md 파일, ${folderRelPaths.length}개 폴더, ${imagePaths.length}개 이미지 발견 (${resolvedVault})`)
 
     const files = []
     for (const absPath of filePaths) {
@@ -178,8 +190,20 @@ function registerVaultIpcHandlers() {
         console.warn('[vault] Failed to read', absPath, err.message)
       }
     }
-    console.log(`[vault] ${files.length}/${filePaths.length}개 파일 읽기 성공`)
-    return { files, folders: folderRelPaths }
+
+    // 이미지 파일: 내용이 아닌 경로만 레지스트리로 반환 (filename → {relativePath, absolutePath})
+    const imageRegistry = {}
+    for (const absPath of imagePaths) {
+      const filename = path.basename(absPath)
+      const relativePath = path.relative(resolvedVault, absPath).replace(/\\/g, '/')
+      // 동일 파일명 충돌 시 첫 번째 발견된 것 우선 (Obsidian 동작과 동일)
+      if (!imageRegistry[filename]) {
+        imageRegistry[filename] = { relativePath, absolutePath: absPath }
+      }
+    }
+
+    console.log(`[vault] ${files.length}/${filePaths.length}개 파일 읽기 성공, ${Object.keys(imageRegistry).length}개 이미지 등록`)
+    return { files, folders: folderRelPaths, imageRegistry }
   })
 
   // ── vault:watch-start ────────────────────────────────────────────────────────
@@ -263,6 +287,25 @@ function registerVaultIpcHandlers() {
     const resolved = path.resolve(filePath)
     if (!fs.existsSync(resolved)) return null
     return fs.readFileSync(resolved, 'utf-8')
+  })
+
+  // ── vault:read-image ──────────────────────────────────────────────────────────
+  ipcMain.handle('vault:read-image', (_event, filePath) => {
+    if (!filePath || typeof filePath !== 'string') return null
+    const resolved = path.resolve(filePath)
+    if (currentVaultPath && !isInsideVault(currentVaultPath, resolved)) return null
+    if (!fs.existsSync(resolved)) return null
+    const ext = path.extname(resolved).slice(1).toLowerCase()
+    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
+    const mime = mimeMap[ext] ?? 'image/png'
+    try {
+      const buffer = fs.readFileSync(resolved)
+      return `data:${mime};base64,${buffer.toString('base64')}`
+    } catch (err) {
+      console.warn('[vault] read-image failed:', err.message)
+      return null
+    }
   })
 
   // ── vault:create-folder ───────────────────────────────────────────────────────
