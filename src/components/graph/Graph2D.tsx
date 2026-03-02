@@ -4,7 +4,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { buildNodeColorMap, getNodeColor } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor } from '@/lib/nodeColors'
 import type { GraphNode, GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -29,6 +29,18 @@ export default function Graph2D({ width, height }: Props) {
     () => buildNodeColorMap(nodes, nodeColorMode, tagColors, folderColors),
     [nodes, nodeColorMode, tagColors, folderColors]
   )
+
+  // Degree map — Obsidian-style node sizing + brightness
+  const { degreeMap, maxDegree } = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const l of links) {
+      const s = typeof l.source === 'string' ? l.source : (l.source as { id: string }).id
+      const t = typeof l.target === 'string' ? l.target : (l.target as { id: string }).id
+      map.set(s, (map.get(s) ?? 0) + 1)
+      map.set(t, (map.get(t) ?? 0) + 1)
+    }
+    return { degreeMap: map, maxDegree: Math.max(1, ...map.values()) }
+  }, [links])
 
   // DOM refs — updated imperatively in simulation tick (avoids React re-render per frame)
   // SVGCircleElement (doc nodes) or SVGRectElement (image nodes)
@@ -507,15 +519,25 @@ export default function Graph2D({ width, height }: Props) {
           {/* Nodes */}
           <g data-testid="graph-nodes">
             {nodes.map(node => {
-              const color = getNodeColor(node, nodeColorMode, nodeColorMap)
+              const baseColor = getNodeColor(node, nodeColorMode, nodeColorMap)
               const isSelected = selectedNodeId === node.id
+
+              // Degree-based size + brightness (Obsidian style)
+              const deg = degreeMap.get(node.id) ?? 0
+              const scaleFactor = Math.sqrt((deg + 1) / (maxDegree + 1))
+              const sizeScale = 0.55 + scaleFactor * 0.45
+              const baseNr = physics.nodeRadius
+              const nr = baseNr * sizeScale
+              const lightFactor = isSelected ? 0 : (1 - scaleFactor) * 0.55
+              const color = lightFactor > 0.01 ? lightenColor(baseColor, lightFactor) : baseColor
+
               const commonProps = {
                 key: node.id,
                 fill: color,
-                fillOpacity: isSelected ? 1 : 0.82,
+                fillOpacity: isSelected ? 1 : 0.9,
                 style: {
                   cursor: 'grab',
-                  filter: isSelected ? `drop-shadow(0 0 6px ${color})` : undefined,
+                  filter: isSelected ? `drop-shadow(0 0 6px ${baseColor})` : undefined,
                   transition: isFast ? undefined : 'r 0.15s, fill-opacity 0.15s',
                 } as CSSProperties,
                 onClick: () => handleNodeClick(node.id),
@@ -527,7 +549,7 @@ export default function Graph2D({ width, height }: Props) {
               }
               if (node.isImage) {
                 // 이미지 노드: 다이아몬드(마름모) — rect를 45도 회전
-                const s = isSelected ? 4.5 : 3
+                const s = isSelected ? nr + 1.5 : Math.max(nr - 1, 2)
                 return (
                   <rect
                     ref={el => { if (el) nodeEls.current.set(node.id, el) }}
@@ -542,7 +564,7 @@ export default function Graph2D({ width, height }: Props) {
                 <circle
                   ref={el => { if (el) nodeEls.current.set(node.id, el) }}
                   cx={width / 2} cy={height / 2}
-                  r={isSelected ? 3.5 : 2}
+                  r={isSelected ? nr + 3 : nr}
                   {...commonProps}
                 />
               )
