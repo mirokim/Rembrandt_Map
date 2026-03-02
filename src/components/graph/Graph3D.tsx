@@ -209,12 +209,13 @@ export default function Graph3D({ width, height }: Props) {
     }
 
     // ── Nodes ────────────────────────────────────────────────────────────────
-    const geo = new THREE.SphereGeometry(NODE_RADIUS, 16, 12)
+    const sphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 16, 12)
+    const octaGeo = new THREE.OctahedronGeometry(NODE_RADIUS * 1.25)
     nodes.forEach(node => {
       const color = getNodeColor(node, nodeColorMode, nodeColorMap)
       // transparent: true so we can dim opacity for non-neighbors
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 })
-      const mesh = new THREE.Mesh(geo, mat)
+      const mesh = new THREE.Mesh(node.isImage ? octaGeo : sphereGeo, mat)
       mesh.userData.nodeId = node.id
       mesh.userData.docId = node.docId
       scene.add(mesh)
@@ -365,7 +366,8 @@ export default function Graph3D({ width, height }: Props) {
         mount.removeChild(css2dRenderer.domElement)
       }
       css2dRendererRef.current = null
-      geo.dispose()
+      sphereGeo.dispose()
+      octaGeo.dispose()
       lineGeo.dispose()
       ringGeo.dispose()
       pGeo.dispose()

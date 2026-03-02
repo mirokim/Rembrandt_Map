@@ -8,6 +8,7 @@ import ChatPanel from '@/components/chat/ChatPanel'
 import SettingsPanel from '@/components/settings/SettingsPanel'
 import ConverterEditor from '@/components/converter/ConverterEditor'
 import MarkdownEditor from '@/components/editor/MarkdownEditor'
+import ImageViewer from '@/components/editor/ImageViewer'
 import PhysicsControls from '@/components/graph/PhysicsControls'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -170,7 +171,12 @@ export default function MainLayout() {
                   ...glassPanelStyle,
                 }}
               >
-                {editingDocId ? <MarkdownEditor /> : <ConverterEditor />}
+                {editingDocId?.startsWith('img:')
+                  ? <ImageViewer />
+                  : editingDocId
+                    ? <MarkdownEditor />
+                    : <ConverterEditor />
+                }
               </motion.div>
             )}
           </div>
