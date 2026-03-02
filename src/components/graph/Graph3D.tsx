@@ -55,6 +55,8 @@ export default function Graph3D({ width, height }: Props) {
   const prevAiHighlightRef = useRef<Set<string>>(new Set())
   // Individual label divs for per-node visibility control (hover-based labels)
   const labelDivsRef = useRef<Map<string, HTMLElement>>(new Map())
+  // Auto-rotate idle timer: resumes autoRotate 10s after last user interaction
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Drag state
   const draggingNodeIdRef = useRef<string | null>(null)
@@ -204,8 +206,16 @@ export default function Graph3D({ width, height }: Props) {
     controls.dampingFactor = 0.08
     controls.autoRotate = true
     controls.autoRotateSpeed = 0.4
-    const onInteractStart = () => { controls.autoRotate = false }
+    const onInteractStart = () => {
+      controls.autoRotate = false
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    }
+    const onInteractEnd = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = setTimeout(() => { controls.autoRotate = true }, 10_000)
+    }
     controls.addEventListener('start', onInteractStart)
+    controls.addEventListener('end', onInteractEnd)
     controlsRef.current = controls
 
     // Register camera reset callback for PhysicsControls
@@ -390,6 +400,8 @@ export default function Graph3D({ width, height }: Props) {
       cancelAnimationFrame(rafRef.current)
       prevHoverStateRef.current = null
       controls.removeEventListener('start', onInteractStart)
+      controls.removeEventListener('end', onInteractEnd)
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
       controls.dispose()
       renderer.dispose()
       mount.removeChild(renderer.domElement)
@@ -649,6 +661,11 @@ export default function Graph3D({ width, height }: Props) {
       setHoveredNode(null)
       lastHoveredRef.current = null
       setTooltip(null)
+      // Schedule auto-rotate resume after dragging outside the component
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = setTimeout(() => {
+        if (controlsRef.current) controlsRef.current.autoRotate = true
+      }, 10_000)
     }
     window.addEventListener('mouseup', handleGlobalMouseUp)
     return () => window.removeEventListener('mouseup', handleGlobalMouseUp)
@@ -683,8 +700,12 @@ export default function Graph3D({ width, height }: Props) {
       ;(simRef.current as any)?.alphaTarget(0.3).restart()
     }
 
-    // Disable orbit controls while dragging a node
-    if (controlsRef.current) controlsRef.current.enabled = false
+    // Disable orbit controls + stop auto-rotate while dragging a node
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false
+      controlsRef.current.autoRotate = false
+    }
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
 
     draggingNodeIdRef.current = nodeId
     isDraggingRef.current = false
@@ -805,6 +826,12 @@ export default function Graph3D({ width, height }: Props) {
     setHoveredNode(null)
     lastHoveredRef.current = null
     setTooltip(null)
+
+    // Schedule auto-rotate resume 10s after last node interaction
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    idleTimerRef.current = setTimeout(() => {
+      if (controlsRef.current) controlsRef.current.autoRotate = true
+    }, 10_000)
   }, [simNodesRef, simRef, setSelectedNode, setSelectedDoc, setCenterTab, setHoveredNode,
       openInEditor, nodes, vaultPath, loadedDocuments, setLoadedDocuments, setNodes, setLinks])
 
