@@ -44,6 +44,7 @@ AI 컨텍스트 수집
 - **3D 그래프**: Three.js + d3-force-3d 기반 입체 그래프
 - **노드 색상 모드**: 문서 유형 / 담당자(speaker) / 폴더 / 태그 / 주제별 색상 구분
 - **팬텀 노드**: 링크 대상이 아직 없는 위키링크도 그래프에 표시 (Obsidian 동작 동일)
+- **이미지 노드**: `![[image.png]]`로 명시적 참조된 이미지가 그래프 노드로 시각화 (다이아몬드 형태, 보라색)
 - **AI 노드 하이라이트**: AI 답변에서 언급된 문서를 그래프에서 자동 하이라이트
 - **노드 라벨 토글**: 상단 바에서 전체 노드 라벨 표시/숨기기 전환
 - **Fast Mode**: 2D 강제 전환 + 호버 스킵 + 동기 물리 틱으로 대용량 볼트에서도 부드러운 렌더링
@@ -66,6 +67,7 @@ AI 컨텍스트 수집
 - **멀티패스 UI**: "탐색 중 → 분석 중" 단계별 진행 표시
 - **QuickQuestions**: 페르소나별 100개 풀에서 랜덤 추천 질문 제공
 - **currentSituation 컨텍스트**: 현재 상황/이슈를 설정해두면 모든 AI 프롬프트에 자동 주입 (실세계 컨텍스트 연결)
+- **이미지 자동 첨부**: 선택한 문서에 `![[...]]` 이미지가 있으면 채팅 전송 시 자동 첨부 → AI vision 분석 가능 (볼트 로드 시 사전 인덱싱으로 즉시 첨부)
 
 ### 다중 LLM 페르소나
 - 5명의 디렉터 페르소나 (총괄 / 아트 / 기획 / 레벨 / 프로그램)
@@ -489,6 +491,12 @@ AI 구조 헤더: "클러스터 1 [전투/스킬/밸런스] (12개): ..."
       ├─ 캐시 히트: tfidfIndex.restore(cached)  ← ms 단위 복원
       └─ 캐시 미스: tfidfIndex.build(docs) → saveTfIdfCache(...)
   → findImplicitLinks(adjacency)  ← 묵시적 연결 사전 계산
+
+  [백그라운드, void async IIFE]
+  → 전체 docs의 imageRefs 수집 (중복 제거)
+  → 10개씩 배치 병렬 readImage() IPC
+  → imageDataCache (filename → base64 dataUrl) 에 저장
+  → 채팅 전송 시 캐시에서 즉시 첨부 (IPC 왕복 없음)
 ```
 
 ---
@@ -559,6 +567,7 @@ python -m uvicorn backend.main:app --port 8765
 - 자연어로 질문: 쿼리에 따라 자동으로 관련 문서를 찾아 답변
   - `"RPG 전투 밸런싱 개선점을 알려주세요"` → TF-IDF로 관련 문서 검색 + BFS 탐색
   - `"전체 프로젝트 인사이트를 알려주세요"` → 전체 그래프 탐색
+- **이미지 자동 첨부**: 그래프에서 `![[image.png]]`가 있는 문서를 선택하면 채팅창에 "🖼️ N개 이미지 자동 첨부" 배지 표시 → 전송 시 이미지가 AI에게 자동 전달되어 vision 분석 가능
 
 ### 5. 마크다운 에디터
 
@@ -583,16 +592,20 @@ type: design              # 문서 유형
 ---
 ```
 
-### 위키링크 활용
+### 위키링크 및 이미지 임베드 활용
 
 ```markdown
 ## 전투 시스템
 
 기본 공격 메커니즘은 [[스킬 트리]]와 연동됩니다.
 밸런싱 기준은 [[게임 디자인 원칙]]을 따릅니다.
+
+![[combat_flowchart.png]]
 ```
 
 **위키링크가 많을수록** BFS 탐색 범위가 넓어져 AI 인사이트의 품질이 향상됩니다.
+
+**`![[image.png]]` 임베드 활용**: 문서에 이미지를 삽입하면 그래프에 이미지 노드가 생성되고, 해당 문서를 선택해 채팅할 때 이미지가 자동으로 AI에 전달됩니다.
 
 ### Speaker ID 목록
 
@@ -637,8 +650,8 @@ src/
 ├── lib/
 │   ├── graphAnalysis.ts    # TF-IDF + PageRank + 클러스터링 + serialize/restore
 │   ├── graphRAG.ts         # Graph-Augmented RAG 파이프라인 + 최근성 정렬
-│   ├── graphBuilder.ts     # 노드/링크 생성 (팬텀 노드 포함)
-│   ├── markdownParser.ts   # YAML 프론트매터 + WikiLink 파싱 (비동기 청크)
+│   ├── graphBuilder.ts     # 노드/링크 생성 (팬텀 노드 + 이미지 노드 포함)
+│   ├── markdownParser.ts   # YAML 프론트매터 + WikiLink + imageRefs 파싱 (비동기 청크)
 │   ├── tfidfCache.ts       # IndexedDB TF-IDF 캐시 (저장/복원/지문 검증)
 │   ├── speakerConfig.ts    # 페르소나 ID + 라벨 + 색상 중앙 설정
 │   ├── modelConfig.ts      # 모델 → 제공자 매핑 + 모델 목록
@@ -653,13 +666,13 @@ src/
 │
 ├── stores/
 │   ├── graphStore.ts       # 노드/링크/선택 상태
-│   ├── vaultStore.ts       # 로드된 문서 리스트
+│   ├── vaultStore.ts       # 로드된 문서 + imagePathRegistry + imageDataCache
 │   ├── settingsStore.ts    # API 키 + 페르소나 모델 + currentSituation (persist)
 │   ├── backendStore.ts     # Python 백엔드 상태
 │   └── uiStore.ts          # 테마 + 탭 + 편집 문서
 │
 └── hooks/
-    ├── useVaultLoader.ts       # 볼트 로드 + TF-IDF 캐시 통합
+    ├── useVaultLoader.ts       # 볼트 로드 + TF-IDF 캐시 + 이미지 사전 인덱싱
     ├── useGraphSimulation.ts   # 2D d3-force 시뮬레이션 (Canvas + Fast Mode)
     └── useGraphSimulation3D.ts # 3D 물리 시뮬레이션
 ```
