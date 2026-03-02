@@ -59,6 +59,21 @@ export default function Graph2DCanvas({ width, height }: Props) {
     nodeMapRef.current = new Map(nodes.map(n => [n.id, n]))
   }, [nodes])
 
+  // Degree map — rebuilt when links change (for Obsidian-style sizing)
+  const degreeMapRef = useRef<Map<string, number>>(new Map())
+  const maxDegreeRef = useRef(1)
+  useEffect(() => {
+    const map = new Map<string, number>()
+    for (const l of links) {
+      const s = typeof l.source === 'string' ? l.source : (l.source as { id: string }).id
+      const t = typeof l.target === 'string' ? l.target : (l.target as { id: string }).id
+      map.set(s, (map.get(s) ?? 0) + 1)
+      map.set(t, (map.get(t) ?? 0) + 1)
+    }
+    degreeMapRef.current = map
+    maxDegreeRef.current = Math.max(1, ...map.values())
+  }, [links])
+
   // ── Draw everything to canvas ───────────────────────────────────────────────
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -96,15 +111,27 @@ export default function Graph2DCanvas({ width, height }: Props) {
     ctx.stroke()
 
     // ── Nodes ───────────────────────────────────────────────────────────────
+    const degreeMap = degreeMapRef.current
+    const maxDeg = maxDegreeRef.current
     for (const simNode of simNodes) {
       const nodeData = nodeMap.get(simNode.id)
       if (!nodeData) continue
       const color = getNodeColor(nodeData, colorMode, colorMap)
       const isSelected = simNode.id === selId
-      ctx.globalAlpha = isSelected ? 1 : 0.82
+
+      // Obsidian-style: radius scales with sqrt(degree+1)
+      const deg = degreeMap.get(simNode.id) ?? 0
+      const baseNr = physicsRef.current.nodeRadius
+      const scaleFactor = Math.sqrt((deg + 1) / (maxDeg + 1))
+      // clamp: min 55% ~ max 100% of baseNr
+      const sizeScale = 0.55 + scaleFactor * 0.45
+      const nr = baseNr * sizeScale
+
+      // Opacity: low-degree nodes are muted (min 0.35 → max 1.0)
+      const opacityScale = 0.35 + scaleFactor * 0.65
+      ctx.globalAlpha = isSelected ? 1 : opacityScale
       ctx.fillStyle = color
 
-      const nr = physicsRef.current.nodeRadius
       if (nodeData.isImage) {
         // 이미지 노드: 다이아몬드(마름모) 형태
         const r = isSelected ? nr + 2 : Math.max(nr - 1, 2)
@@ -133,7 +160,11 @@ export default function Graph2DCanvas({ width, height }: Props) {
         ctx.lineWidth = 1.5 / scale
         ctx.setLineDash([4 / scale, 3 / scale])
         ctx.beginPath()
-        ctx.arc(selNode.x, selNode.y, (physicsRef.current.nodeRadius + 8) / scale, 0, Math.PI * 2)
+        const selDeg = degreeMapRef.current.get(selId) ?? 0
+        const selMaxDeg = maxDegreeRef.current
+        const selSizeFactor = 0.55 + Math.sqrt((selDeg + 1) / (selMaxDeg + 1)) * 0.45
+        const selNr = physicsRef.current.nodeRadius * selSizeFactor
+        ctx.arc(selNode.x, selNode.y, (selNr + 8) / scale, 0, Math.PI * 2)
         ctx.stroke()
         ctx.setLineDash([])
       }
@@ -194,7 +225,7 @@ export default function Graph2DCanvas({ width, height }: Props) {
     if (cachedSimNodesRef.current.length > 0) drawCanvas()
     // drawCanvas is stable (only changes with width/height), listed deps are the triggers
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNodeId, showNodeLabels, nodeColorMode, nodeColorMap, physics.nodeRadius])
+  }, [selectedNodeId, showNodeLabels, nodeColorMode, nodeColorMap, physics.nodeRadius, links])
 
   // ── Wheel zoom ───────────────────────────────────────────────────────────────
   const handleWheel = useCallback((e: WheelEvent) => {

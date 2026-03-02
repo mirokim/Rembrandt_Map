@@ -9,14 +9,12 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  X, BarChart2, Clock, Download, Trash2,
+  X, BarChart2, Trash2,
   Settings, Cpu, GitMerge, Keyboard, Info,
-  Layers, FileCode,
+  Layers,
   Users, Tag,
 } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
-import ConverterEditor from '@/components/converter/ConverterEditor'
-
 import GeneralTab from './tabs/GeneralTab'
 import AITab from './tabs/AITab'
 import PersonasTab from './tabs/PersonasTab'
@@ -24,11 +22,14 @@ import DebateTab from './tabs/DebateTab'
 import ProjectTab from './tabs/ProjectTab'
 import AboutTab from './tabs/AboutTab'
 import TagsTab from './tabs/TagsTab'
+import StatsTab from './tabs/StatsTab'
+import TrashTab from './tabs/TrashTab'
+import ShortcutsTab from './tabs/ShortcutsTab'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SettingsTab =
-  | 'stats' | 'timeline' | 'export' | 'trash' | 'converter'
+  | 'stats' | 'trash'
   | 'general' | 'ai' | 'personas' | 'debate' | 'shortcuts' | 'project' | 'tags'
   | 'about'
 
@@ -41,11 +42,8 @@ const NAV: NavGroup[] = [
   {
     label: '도구',
     items: [
-      { id: 'stats',     icon: BarChart2, label: '통계' },
-      { id: 'timeline',  icon: Clock,     label: '타임라인' },
-      { id: 'export',    icon: Download,  label: '내보내기' },
-      { id: 'converter', icon: FileCode,  label: '가져오기' },
-      { id: 'trash',     icon: Trash2,    label: '휴지통' },
+      { id: 'stats', icon: BarChart2, label: '통계' },
+      { id: 'trash', icon: Trash2,    label: '휴지통' },
     ],
   },
   {
@@ -85,12 +83,15 @@ function PlaceholderContent({ label }: { label: string }) {
 
 function renderTabContent(tab: SettingsTab) {
   switch (tab) {
+    case 'stats':     return <StatsTab />
+    case 'trash':     return <TrashTab />
     case 'general':   return <GeneralTab />
     case 'ai':        return <AITab />
     case 'personas':  return <PersonasTab />
     case 'project':   return <ProjectTab />
     case 'debate':    return <DebateTab />
     case 'tags':      return <TagsTab />
+    case 'shortcuts': return <ShortcutsTab />
     case 'about':     return <AboutTab />
     default:          return <PlaceholderContent label={ALL_ITEMS.find(i => i.id === tab)?.label ?? tab} />
   }
@@ -238,15 +239,8 @@ export default function SettingsPanel() {
                 </div>
 
                 {/* Scrollable body */}
-                <div className={
-                  activeTab === 'converter'
-                    ? 'flex-1 overflow-hidden flex flex-col'
-                    : 'flex-1 overflow-y-auto px-6 py-5'
-                }>
-                  {activeTab === 'converter'
-                    ? <ConverterEditor onBack={() => setSettingsPanelOpen(false)} />
-                    : renderTabContent(activeTab)
-                  }
+                <div className="flex-1 overflow-y-auto px-6 py-5">
+                  {renderTabContent(activeTab)}
                 </div>
 
                 {/* Footer */}

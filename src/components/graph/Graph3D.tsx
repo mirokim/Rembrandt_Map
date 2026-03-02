@@ -210,16 +210,32 @@ export default function Graph3D({ width, height }: Props) {
       controls.reset()
     }
 
+    // ── Degree map for Obsidian-style node sizing ─────────────────────────
+    const degMap = new Map<string, number>()
+    links.forEach((l: GraphLink) => {
+      const s = typeof l.source === 'string' ? l.source : (l.source as { id: string }).id
+      const t = typeof l.target === 'string' ? l.target : (l.target as { id: string }).id
+      degMap.set(s, (degMap.get(s) ?? 0) + 1)
+      degMap.set(t, (degMap.get(t) ?? 0) + 1)
+    })
+    const maxDeg3D = Math.max(1, ...degMap.values())
+
     // ── Nodes ────────────────────────────────────────────────────────────────
     const sphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 16, 12)
     const octaGeo = new THREE.OctahedronGeometry(NODE_RADIUS * 1.25)
     nodes.forEach(node => {
       const color = getNodeColor(node, nodeColorMode, nodeColorMap)
+      const deg3d = degMap.get(node.id) ?? 0
+      const sf3d = 0.55 + Math.sqrt((deg3d + 1) / (maxDeg3D + 1)) * 0.45
+      const baseScale = nodeRadiusRef.current / 7
       // transparent: true so we can dim opacity for non-neighbors
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1.0 })
+      const opacity = 0.35 + sf3d * 0.65
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity })
       const mesh = new THREE.Mesh(node.isImage ? octaGeo : sphereGeo, mat)
+      mesh.scale.setScalar(baseScale * sf3d)
       mesh.userData.nodeId = node.id
       mesh.userData.docId = node.docId
+      mesh.userData.degreeScale = sf3d  // cache for nodeRadius effect
       scene.add(mesh)
       nodeMeshesRef.current.set(node.id, mesh)
 
@@ -326,14 +342,24 @@ export default function Graph3D({ width, height }: Props) {
       const aiSet = aiHighlightRef.current
       const prevAiSet = prevAiHighlightRef.current
       if (aiSet.size > 0) {
-        const baseScale = nodeRadiusRef.current / 7
-        const pulseFactor = baseScale * (1 + Math.sin(tickRef.current * 0.06) * 0.3)
+        const baseNr = nodeRadiusRef.current / 7
+        const pulseBase = 1 + Math.sin(tickRef.current * 0.06) * 0.3
         aiSet.forEach(nodeId => {
-          nodeMeshesRef.current.get(nodeId)?.scale.setScalar(pulseFactor)
+          const mesh = nodeMeshesRef.current.get(nodeId)
+          if (mesh) {
+            const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
+            mesh.scale.setScalar(baseNr * sf * pulseBase)
+          }
         })
         // Reset nodes that left the highlight set
         prevAiSet.forEach(nodeId => {
-          if (!aiSet.has(nodeId)) nodeMeshesRef.current.get(nodeId)?.scale.setScalar(baseScale)
+          if (!aiSet.has(nodeId)) {
+            const mesh = nodeMeshesRef.current.get(nodeId)
+            if (mesh) {
+              const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
+              mesh.scale.setScalar(baseNr * sf)
+            }
+          }
         })
       }
       prevAiHighlightRef.current = aiSet
@@ -439,8 +465,11 @@ export default function Graph3D({ width, height }: Props) {
 
   // ── Node size 실시간 반영 ────────────────────────────────────────────────
   useEffect(() => {
-    const scale = physics.nodeRadius / 7
-    nodeMeshesRef.current.forEach(mesh => mesh.scale.setScalar(scale))
+    const baseScale = physics.nodeRadius / 7
+    nodeMeshesRef.current.forEach(mesh => {
+      const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
+      mesh.scale.setScalar(baseScale * sf)
+    })
   }, [physics.nodeRadius])
 
   // ── CSS2DRenderer labels: hide only when overlay panel is active ────────────

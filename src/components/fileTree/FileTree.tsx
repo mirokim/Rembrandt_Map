@@ -9,6 +9,7 @@ import { useDocumentFilter } from '@/hooks/useDocumentFilter'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
+import { useTrashStore } from '@/stores/trashStore'
 import { parseVaultFiles } from '@/lib/markdownParser'
 import { buildGraph } from '@/lib/graphBuilder'
 import SearchBar from './SearchBar'
@@ -136,8 +137,9 @@ export default function FileTree() {
   } = useDocumentFilter()
 
   const { vaultPath, loadedDocuments, setLoadedDocuments, vaultFolders, setVaultFolders } = useVaultStore()
-  const { setNodes, setLinks } = useGraphStore()
+  const { setNodes, setLinks, nodes, links } = useGraphStore()
   const { openInEditor, editingDocId } = useUIStore()
+  const pushTrash = useTrashStore(s => s.push)
 
   const rebuildGraph = useCallback((docs: LoadedDocument[]) => {
     const { nodes, links } = buildGraph(docs)
@@ -271,9 +273,18 @@ export default function FileTree() {
   }
 
   const handleDelete = async (absolutePath: string, filename: string) => {
-    const confirmed = window.confirm(`"${filename}" 을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)
+    const confirmed = window.confirm(`"${filename}" 을(를) 삭제하시겠습니까?\n설정 › 휴지통에서 복원할 수 있습니다.`)
     if (!confirmed) return
     try {
+      // 삭제 전 내용 백업 → 휴지통 스토어에 보관
+      const content = await window.vaultAPI?.readFile(absolutePath) ?? ''
+      const doc = loadedDocuments?.find(d => d.absolutePath === absolutePath)
+      pushTrash({
+        filename,
+        absolutePath,
+        folderPath: doc?.folderPath ?? '',
+        content,
+      })
       await window.vaultAPI?.deleteFile(absolutePath)
       await reloadVault()
     } catch (e) {
@@ -497,7 +508,12 @@ export default function FileTree() {
         className="px-3 py-2 text-[10px] shrink-0"
         style={{ color: 'var(--color-text-muted)', borderTop: '1px solid var(--color-border)' }}
       >
-        {filtered.length} / {totalCount} 문서
+        <span>{filtered.length} / {totalCount} 문서</span>
+        {nodes.length > 0 && (
+          <span style={{ opacity: 0.6 }}>
+            {' · '}{nodes.length} 노드 · {links.length} 와이어
+          </span>
+        )}
       </div>
 
       {/* ── Context menu (portal to document.body) ── */}
