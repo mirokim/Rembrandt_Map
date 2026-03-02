@@ -4,7 +4,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, DEGREE_SIZE_MIN, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, degreeSize, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
 import type { GraphNode, GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -60,6 +60,9 @@ export default function Graph2D({ width, height }: Props) {
   const viewRef = useRef({ x: 0, y: 0, scale: 1 })
   const isPanningRef = useRef(false)
   const panStartRef = useRef({ mx: 0, my: 0, tx: 0, ty: 0 })
+  // true while wheel-zooming — suppresses hover effects during scroll
+  const isScrollingRef = useRef(false)
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Drag state — which node is being dragged
   const draggingNodeRef = useRef<string | null>(null)
@@ -178,6 +181,11 @@ export default function Graph2D({ width, height }: Props) {
   // ── Pan/zoom: wheel zoom ──────────────────────────────────────────────────
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault()
+    // Mark as scrolling — suppresses hover tooltip while zooming
+    isScrollingRef.current = true
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current)
+    scrollTimeoutRef.current = setTimeout(() => { isScrollingRef.current = false }, 300)
+
     const view = viewRef.current
     const el = svgRef.current
     if (!el) return
@@ -203,7 +211,10 @@ export default function Graph2D({ width, height }: Props) {
     const el = svgRef.current
     if (!el) return
     el.addEventListener('wheel', handleWheel, { passive: false })
-    return () => el.removeEventListener('wheel', handleWheel)
+    return () => {
+      el.removeEventListener('wheel', handleWheel)
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current)
+    }
   }, [handleWheel])
 
   // ── Global mouseup: release drag or pan even when mouse leaves SVG ─────────
@@ -373,12 +384,14 @@ export default function Graph2D({ width, height }: Props) {
   // Fast mode: skip hover entirely (no label reveal, no neighbor highlight)
   const handleMouseEnter = useCallback((nodeId: string) => {
     if (isFastRef.current) return
+    if (isPanningRef.current || isScrollingRef.current) return
     setHoveredNode(nodeId)
   }, [setHoveredNode])
 
   const handleMouseLeave = useCallback(() => {
     // Don't clear hover while actively dragging this node
     if (draggingNodeRef.current) return
+    isPanningRef.current = false
     setHoveredNode(null)
     setTooltip(null)
   }, [setHoveredNode])
@@ -525,12 +538,11 @@ export default function Graph2D({ width, height }: Props) {
               // Degree-based size + brightness (Obsidian style)
               const deg = degreeMap.get(node.id) ?? 0
               const sf = degreeScaleFactor(deg, maxDegree)
-              const nr = physics.nodeRadius * (DEGREE_SIZE_MIN + sf * (1 - DEGREE_SIZE_MIN))
+              const nr = physics.nodeRadius * degreeSize(sf)
               const lightFactor = isSelected ? 0 : (1 - sf) * DEGREE_LIGHT_MAX
               const color = lightFactor > 0.01 ? lightenColor(baseColor, lightFactor) : baseColor
 
-              const commonProps = {
-                key: node.id,
+              const sharedProps = {
                 fill: color,
                 fillOpacity: isSelected ? 1 : 0.9,
                 style: {
@@ -550,20 +562,22 @@ export default function Graph2D({ width, height }: Props) {
                 const s = isSelected ? nr + 1.5 : Math.max(nr - 1, 2)
                 return (
                   <rect
+                    key={node.id}
                     ref={el => { if (el) nodeEls.current.set(node.id, el) }}
                     x={width / 2 - s} y={height / 2 - s}
                     width={s * 2} height={s * 2}
                     transform={`rotate(45, ${width / 2}, ${height / 2})`}
-                    {...commonProps}
+                    {...sharedProps}
                   />
                 )
               }
               return (
                 <circle
+                  key={node.id}
                   ref={el => { if (el) nodeEls.current.set(node.id, el) }}
                   cx={width / 2} cy={height / 2}
                   r={isSelected ? nr + 3 : nr}
-                  {...commonProps}
+                  {...sharedProps}
                 />
               )
             })}

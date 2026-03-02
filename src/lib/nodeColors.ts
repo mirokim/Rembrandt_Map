@@ -245,7 +245,17 @@ export function degreeScaleFactor(degree: number, maxDegree: number): number {
   return Math.sqrt((degree + 1) / (Math.max(1, maxDegree) + 1))
 }
 
-/** Min size ratio for zero-degree nodes */
-export const DEGREE_SIZE_MIN = 0.25
+/** Min size ratio for zero-degree nodes (relative to physics.nodeRadius) */
+export const DEGREE_SIZE_MIN = 0.2
+/** Max size ratio for max-degree nodes (relative to physics.nodeRadius). >1 = larger than base */
+export const DEGREE_SIZE_MAX = 2.0
 /** Max white-mix ratio for zero-degree nodes */
 export const DEGREE_LIGHT_MAX = 0.65
+
+/**
+ * Convert a degree scale factor (0–1) to a size multiplier in [DEGREE_SIZE_MIN, DEGREE_SIZE_MAX].
+ * Use: finalRadius = baseRadius * degreeSize(sf)
+ */
+export function degreeSize(sf: number): number {
+  return DEGREE_SIZE_MIN + sf * (DEGREE_SIZE_MAX - DEGREE_SIZE_MIN)
+}

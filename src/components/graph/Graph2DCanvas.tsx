@@ -3,7 +3,7 @@ import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphSimulation, type SimNode, type SimLink } from '@/hooks/useGraphSimulation'
-import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, DEGREE_SIZE_MIN, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, degreeSize, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
 import type { GraphNode } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -123,7 +123,7 @@ export default function Graph2DCanvas({ width, height }: Props) {
       const deg = degreeMap.get(simNode.id) ?? 0
       const baseNr = physicsRef.current.nodeRadius
       const sf = degreeScaleFactor(deg, maxDeg)
-      const nr = baseNr * (DEGREE_SIZE_MIN + sf * (1 - DEGREE_SIZE_MIN))
+      const nr = baseNr * degreeSize(sf)
       const lightFactor = isSelected ? 0 : (1 - sf) * DEGREE_LIGHT_MAX
       ctx.globalAlpha = isSelected ? 1 : 0.9
       ctx.fillStyle = lightFactor > 0.01 ? lightenColor(color, lightFactor) : color
@@ -158,7 +158,7 @@ export default function Graph2DCanvas({ width, height }: Props) {
         ctx.beginPath()
         const selDeg = degreeMapRef.current.get(selId) ?? 0
         const selSf = degreeScaleFactor(selDeg, maxDegreeRef.current)
-        const selNr = physicsRef.current.nodeRadius * (DEGREE_SIZE_MIN + selSf * (1 - DEGREE_SIZE_MIN))
+        const selNr = physicsRef.current.nodeRadius * degreeSize(selSf)
         ctx.arc(selNode.x, selNode.y, (selNr + 8) / scale, 0, Math.PI * 2)
         ctx.stroke()
         ctx.setLineDash([])

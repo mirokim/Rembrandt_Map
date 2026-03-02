@@ -13,7 +13,7 @@ import { useGraphSimulation3D, type SimNode3D, type SimLink3D } from '@/hooks/us
 import { useFrameRate } from '@/hooks/useFrameRate'
 import { graphCallbacks } from '@/lib/graphEvents'
 import { SPEAKER_CONFIG } from '@/lib/speakerConfig'
-import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, DEGREE_SIZE_MIN, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
+import { buildNodeColorMap, getNodeColor, lightenColor, degreeScaleFactor, degreeSize, DEGREE_LIGHT_MAX } from '@/lib/nodeColors'
 import type { GraphLink } from '@/types'
 import NodeTooltip from './NodeTooltip'
 
@@ -235,10 +235,12 @@ export default function Graph3D({ width, height }: Props) {
       const finalColor = lightFactor > 0.01 ? lightenColor(color, lightFactor) : color
       const mat = new THREE.MeshBasicMaterial({ color: finalColor, transparent: true, opacity: 1.0 })
       const mesh = new THREE.Mesh(node.isImage ? octaGeo : sphereGeo, mat)
-      mesh.scale.setScalar(baseScale * (DEGREE_SIZE_MIN + sf3d * (1 - DEGREE_SIZE_MIN)))
+      const scaledRadius = baseScale * degreeSize(sf3d)
+      mesh.scale.setScalar(scaledRadius)
       mesh.userData.nodeId = node.id
       mesh.userData.docId = node.docId
-      mesh.userData.degreeScale = sf3d  // cache for nodeRadius + color refresh
+      mesh.userData.degreeScale = sf3d    // cache for color refresh
+      mesh.userData.scaledRadius = scaledRadius  // cache for animation loop
       scene.add(mesh)
       nodeMeshesRef.current.set(node.id, mesh)
 
@@ -345,13 +347,11 @@ export default function Graph3D({ width, height }: Props) {
       const aiSet = aiHighlightRef.current
       const prevAiSet = prevAiHighlightRef.current
       if (aiSet.size > 0) {
-        const baseNr = nodeRadiusRef.current / 7
         const pulseBase = 1 + Math.sin(tickRef.current * 0.06) * 0.3
         aiSet.forEach(nodeId => {
           const mesh = nodeMeshesRef.current.get(nodeId)
           if (mesh) {
-            const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
-            mesh.scale.setScalar(baseNr * sf * pulseBase)
+            mesh.scale.setScalar((mesh.userData.scaledRadius as number) * pulseBase)
           }
         })
         // Reset nodes that left the highlight set
@@ -359,8 +359,7 @@ export default function Graph3D({ width, height }: Props) {
           if (!aiSet.has(nodeId)) {
             const mesh = nodeMeshesRef.current.get(nodeId)
             if (mesh) {
-              const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
-              mesh.scale.setScalar(baseNr * sf)
+              mesh.scale.setScalar(mesh.userData.scaledRadius as number)
             }
           }
         })
@@ -471,7 +470,9 @@ export default function Graph3D({ width, height }: Props) {
     const baseScale = physics.nodeRadius / 7
     nodeMeshesRef.current.forEach(mesh => {
       const sf = (mesh.userData.degreeScale as number | undefined) ?? 1
-      mesh.scale.setScalar(baseScale * (DEGREE_SIZE_MIN + sf * (1 - DEGREE_SIZE_MIN)))
+      const scaledRadius = baseScale * degreeSize(sf)
+      mesh.userData.scaledRadius = scaledRadius
+      mesh.scale.setScalar(scaledRadius)
     })
   }, [physics.nodeRadius])
 
@@ -499,8 +500,10 @@ export default function Graph3D({ width, height }: Props) {
   useEffect(() => {
     aiHighlightRef.current = new Set(aiHighlightNodeIds)
     if (aiHighlightNodeIds.length === 0) {
-      // Reset all node scales immediately when highlights are cleared
-      nodeMeshesRef.current.forEach(mesh => mesh.scale.setScalar(1))
+      // Reset all node scales to degree-based size when highlights are cleared
+      nodeMeshesRef.current.forEach(mesh => {
+        mesh.scale.setScalar(mesh.userData.scaledRadius as number)
+      })
     }
   }, [aiHighlightNodeIds])
 
