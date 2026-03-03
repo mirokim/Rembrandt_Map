@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, shell, session, ipcMain, dialog, protocol, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
@@ -86,58 +86,110 @@ function isInsideVault(vaultPath, filePath) {
 const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i
 
 /**
- * Read an image file and return a base64 data URL.
- * Detects the actual MIME type from file magic bytes rather than relying
- * solely on the file extension — handles misnamed files (e.g. JPEG saved as .png).
- * Returns null if the file is empty, unreadable, or not a known image format.
+ * Detect image MIME type from file magic bytes.
+ * Falls back to extension if magic bytes are not recognized.
+ * Returns null for unknown/non-image files.
+ */
+function detectMime(buffer, absPath) {
+  if (!buffer || buffer.length === 0) return null
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return 'image/png'
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return 'image/jpeg'
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif'
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+      buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) return 'image/webp'
+  if (buffer[0] === 0x42 && buffer[1] === 0x4D) return 'image/bmp'
+  const head = buffer.slice(0, 64).toString('utf8')
+  if (head.includes('<svg') || head.includes('<?xml')) return 'image/svg+xml'
+  const ext = path.extname(absPath).slice(1).toLowerCase()
+  return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+           gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }[ext] ?? null
+}
+
+/**
+ * Read an image file and return a base64 data URL (used by legacy IPC handlers).
  */
 function readImageAsDataUrl(absPath) {
   let buffer
-  try {
-    buffer = fs.readFileSync(absPath)
-  } catch (err) {
+  try { buffer = fs.readFileSync(absPath) } catch (err) {
     console.warn('[vault] readImageAsDataUrl: readFileSync failed:', absPath, err.message)
     return null
   }
-  if (!buffer || buffer.length === 0) {
-    console.warn('[vault] readImageAsDataUrl: empty file:', absPath)
-    return null
-  }
-
-  // Detect MIME from magic bytes (more reliable than file extension)
-  let mime = null
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
-    mime = 'image/png'
-  } else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-    mime = 'image/jpeg'
-  } else if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
-    mime = 'image/gif'  // GIF87a or GIF89a
-  } else if (
-    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
-  ) {
-    mime = 'image/webp'
-  } else if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
-    mime = 'image/bmp'
-  } else {
-    // SVG or fallback to extension
-    const head = buffer.slice(0, 64).toString('utf8')
-    if (head.includes('<svg') || head.includes('<?xml')) {
-      mime = 'image/svg+xml'
-    } else {
-      const ext = path.extname(absPath).slice(1).toLowerCase()
-      const byExt = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-                      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
-      mime = byExt[ext] ?? null
-    }
-  }
-
-  if (!mime) {
-    console.warn('[vault] readImageAsDataUrl: unrecognized format:', absPath)
-    return null
-  }
+  if (!buffer || buffer.length === 0) return null
+  const mime = detectMime(buffer, absPath)
+  if (!mime) { console.warn('[vault] readImageAsDataUrl: unrecognized format:', absPath); return null }
   return `data:${mime};base64,${buffer.toString('base64')}`
 }
+
+// ── Image registry cache (for rembrandt-img:// protocol handler) ───────────────
+// Kept in main process memory so the protocol handler can resolve filenames
+// without an IPC round-trip.
+
+/** Original basename → { relativePath, absolutePath } */
+let currentImageRegistry = {}
+/**
+ * Normalized basename (lowercase, spaces→underscores) → absolutePath
+ * Built whenever the vault loads; allows O(1) lookup by normalized key.
+ */
+let currentNormalizedImageMap = {}
+
+function buildNormalizedImageMap(registry) {
+  const map = {}
+  for (const [key, entry] of Object.entries(registry)) {
+    const norm = key.toLowerCase().replace(/\s+/g, '_')
+    if (!map[norm]) map[norm] = entry.absolutePath
+  }
+  return map
+}
+
+/**
+ * Find an absolute path for a given normalized image name.
+ * 1. O(1) lookup in normalizedMap (built from vault:load-files registry)
+ * 2. Fast existsSync check in common Obsidian attachment folders
+ * 3. Slow recursive directory search (fallback of last resort)
+ */
+function resolveImagePath(normalizedName) {
+  // 1. Registry lookup (O(1))
+  const fromRegistry = currentNormalizedImageMap[normalizedName]
+  if (fromRegistry && fs.existsSync(fromRegistry)) return fromRegistry
+
+  if (!currentVaultPath) return null
+
+  // 2. Fast path: common Obsidian attachment folders
+  const COMMON = ['attachments', 'Attachments', 'assets', 'images', 'img', 'media', 'files']
+  for (const folder of COMMON) {
+    // Try normalized name (underscores) — Windows FS is case-insensitive but not space-insensitive
+    const c1 = path.join(currentVaultPath, folder, normalizedName)
+    if (fs.existsSync(c1)) return c1
+  }
+
+  // 3. Slow path: recursive search with normalized name comparison
+  function normStr(s) { return s.toLowerCase().replace(/\s+/g, '_') }
+  function searchDir(dir, depth) {
+    if (depth > 8) return null
+    let entries
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return null }
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue
+      const full = path.join(dir, e.name)
+      if (normStr(e.name) === normalizedName) return full
+      let isDir = false
+      try { isDir = e.isDirectory() } catch { /* ignore */ }
+      if (!isDir && !/\.\w{1,10}$/.test(e.name)) {
+        try { fs.readdirSync(full); isDir = true } catch { /* not a dir */ }
+      }
+      if (isDir) { const r = searchDir(full, depth + 1); if (r) return r }
+    }
+    return null
+  }
+  return searchDir(currentVaultPath, 0)
+}
+
+// ── Register rembrandt-img:// custom protocol ─────────────────────────────────
+// Must be called before app.ready — registers the scheme as "secure" so Chromium
+// treats it like https:// (no mixed-content errors when served from http:// dev server).
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'rembrandt-img', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+])
 
 /**
  * Recursively collect all .md files, image files, AND subdirectory paths in dirPath.
@@ -256,6 +308,10 @@ function registerVaultIpcHandlers() {
       }
     }
 
+    // Keep in-memory copy for the rembrandt-img:// protocol handler
+    currentImageRegistry = imageRegistry
+    currentNormalizedImageMap = buildNormalizedImageMap(imageRegistry)
+
     console.log(`[vault] ${files.length}/${filePaths.length}개 파일 읽기 성공, ${Object.keys(imageRegistry).length}개 이미지 등록`)
     return { files, folders: folderRelPaths, imageRegistry }
   })
@@ -353,66 +409,13 @@ function registerVaultIpcHandlers() {
   })
 
   // ── vault:find-image-by-name ──────────────────────────────────────────────────
-  // 레지스트리에 없는 경우를 위한 폴백: basename으로 볼트 전체를 직접 탐색
-  // collectVaultContents 대신 독립적인 탐색 구현 (isDirectory 기반)
+  // Legacy fallback IPC (kept for compatibility). Uses the shared resolveImagePath helper.
   ipcMain.handle('vault:find-image-by-name', (_event, filename) => {
     if (!filename || typeof filename !== 'string') return null
-    if (!currentVaultPath) return null
-
-    // normalize: lowercase + spaces → underscores (matches graphBuilder imageId convention)
-    const normTarget = filename.toLowerCase().replace(/\s+/g, '_')
-    function normName(n) { return n.toLowerCase().replace(/\s+/g, '_') }
-
-    // ── Fast path: existsSync in common Obsidian attachment folders ──
-    // Windows existsSync is case-insensitive, so this works regardless of
-    // the actual case of the stored filename.
-    const COMMON = ['attachments', 'Attachments', 'assets', 'images', 'img', 'media', 'files']
-    for (const folder of COMMON) {
-      const candidate = path.join(currentVaultPath, folder, filename)
-      if (fs.existsSync(candidate)) {
-        const result = readImageAsDataUrl(candidate)
-        if (result) { console.log('[vault] find-image fast-path:', candidate); return result }
-      }
-    }
-    // Also try vault root directly
-    const rootCandidate = path.join(currentVaultPath, filename)
-    if (fs.existsSync(rootCandidate)) {
-      const result = readImageAsDataUrl(rootCandidate)
-      if (result) { console.log('[vault] find-image fast-path (root):', rootCandidate); return result }
-    }
-
-    // ── Slow path: recursive search using isDirectory() ──
-    function searchDir(dirPath, depth) {
-      if (depth > 8) return null
-      let entries
-      try { entries = fs.readdirSync(dirPath, { withFileTypes: true }) } catch { return null }
-      for (const entry of entries) {
-        if (entry.name.startsWith('.')) continue
-        const fullPath = path.join(dirPath, entry.name)
-        // Name match (normalized comparison handles spaces vs underscores)
-        if (normName(entry.name) === normTarget) return fullPath
-        // Recurse into directories
-        let isDir = false
-        try { isDir = entry.isDirectory() } catch { /* ignore */ }
-        if (!isDir && !/\.\w{1,10}$/.test(entry.name)) {
-          // No extension + isDirectory() failed → try readdirSync as directory detection
-          try { fs.readdirSync(fullPath); isDir = true } catch { /* not a dir */ }
-        }
-        if (isDir) {
-          const result = searchDir(fullPath, depth + 1)
-          if (result) return result
-        }
-      }
-      return null
-    }
-
-    const found = searchDir(currentVaultPath, 0)
-    if (!found) {
-      console.warn('[vault] find-image-by-name: not found →', filename)
-      return null
-    }
-    console.log('[vault] find-image slow-path:', found)
-    return readImageAsDataUrl(found)
+    const normName = filename.toLowerCase().replace(/\s+/g, '_')
+    const absPath = resolveImagePath(normName)
+    if (!absPath) { console.warn('[vault] find-image-by-name: not found →', filename); return null }
+    return readImageAsDataUrl(absPath)
   })
 
   // ── vault:create-folder ───────────────────────────────────────────────────────
@@ -557,6 +560,42 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
+    // ── rembrandt-img:// protocol — serve vault images directly from disk ──────
+    // This replaces the data-URL/IPC approach: no base64 encoding, no size limits,
+    // no MIME guessing in the renderer. The browser loads images natively.
+    protocol.handle('rembrandt-img', (request) => {
+      try {
+        const url = new URL(request.url)
+        // URL: rembrandt-img:///image-2025-6-30_12-13-7.png
+        // pathname = '/image-2025-6-30_12-13-7.png'
+        const normalizedName = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+        if (!normalizedName) return new Response(null, { status: 400 })
+
+        const absPath = resolveImagePath(normalizedName)
+        if (!absPath) {
+          console.warn('[rembrandt-img] not found:', normalizedName)
+          return new Response(null, { status: 404 })
+        }
+
+        let buffer
+        try { buffer = fs.readFileSync(absPath) } catch {
+          return new Response(null, { status: 500 })
+        }
+
+        const mime = detectMime(buffer, absPath) ?? 'application/octet-stream'
+        return new Response(buffer, {
+          status: 200,
+          headers: {
+            'Content-Type': mime,
+            'Cache-Control': 'public, max-age=3600',
+          },
+        })
+      } catch (err) {
+        console.error('[rembrandt-img] handler error:', err)
+        return new Response(null, { status: 500 })
+      }
+    })
+
     registerVaultIpcHandlers()
     registerBackendIpcHandlers()
     registerWindowIpcHandlers()

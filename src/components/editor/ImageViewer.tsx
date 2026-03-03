@@ -6,25 +6,36 @@ import { useVaultStore } from '@/stores/vaultStore'
 /**
  * ImageViewer — 이미지 노드 더블클릭 시 에디터 영역에 표시되는 뷰어.
  * editingDocId = 'img:{normalizedFilename}' 형태일 때 렌더링됨.
+ *
+ * 이미지는 rembrandt-img:// 커스텀 프로토콜을 통해 디스크에서 직접 로드됨.
+ * 메인 프로세스의 protocol.handle 핸들러가 normalizedName → absolutePath 변환을
+ * imagePathRegistry + 재귀 검색으로 해결하므로 렌더러 측 복잡도가 없음.
  */
 export default function ImageViewer() {
   const { editingDocId, closeEditor, openInEditor } = useUIStore()
-  const imageDataCache = useVaultStore(s => s.imageDataCache)
   const imagePathRegistry = useVaultStore(s => s.imagePathRegistry)
   const loadedDocuments = useVaultStore(s => s.loadedDocuments)
-  const [dataUrl, setDataUrl] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [imgError, setImgError] = useState(false)
 
   // 'img:my_image.png' → 'my_image.png'
   const normalizedRef = editingDocId?.startsWith('img:') ? editingDocId.slice(4) : null
 
-  // 캐시/레지스트리에서 원본 파일명 복원 (소문자+공백→_ 역변환)
-  const originalRef = normalizedRef
-    ? (Object.keys(imageDataCache).find(k => k.toLowerCase().replace(/\s+/g, '_') === normalizedRef)
-      ?? Object.keys(imagePathRegistry ?? {}).find(k => k.toLowerCase().replace(/\s+/g, '_') === normalizedRef))
-    : null
+  // Reset error state when a different image is opened
+  useEffect(() => { setImgError(false) }, [normalizedRef])
 
-  const displayName = originalRef ?? normalizedRef ?? '이미지'
+  // Display name: try to recover original filename with spaces from registry
+  const displayName = useMemo(() => {
+    if (!normalizedRef) return '이미지'
+    const origKey = Object.keys(imagePathRegistry ?? {}).find(
+      k => k.toLowerCase().replace(/\s+/g, '_') === normalizedRef
+    )
+    return origKey ?? normalizedRef
+  }, [normalizedRef, imagePathRegistry])
+
+  // Protocol URL — main process resolves normalizedRef → actual file path
+  const imageUrl = normalizedRef
+    ? `rembrandt-img:///${encodeURIComponent(normalizedRef)}`
+    : null
 
   // 이 이미지를 ![[...]]로 참조하는 문서 목록
   const referencingDocs = useMemo(() => {
@@ -33,45 +44,6 @@ export default function ImageViewer() {
       d.imageRefs?.some(r => r.toLowerCase().replace(/\s+/g, '_') === normalizedRef)
     )
   }, [loadedDocuments, normalizedRef])
-
-  useEffect(() => {
-    if (!normalizedRef) return
-
-    // 1. 사전 인덱싱 캐시에서 즉시 조회
-    const cached = originalRef ? imageDataCache[originalRef] : null
-    if (cached) {
-      setDataUrl(cached)
-      return
-    }
-
-    // 2. 캐시 미스 → IPC on-demand 로드
-    if (!window.vaultAPI) return
-
-    const entry = originalRef ? imagePathRegistry?.[originalRef] : null
-
-    setIsLoading(true)
-    setDataUrl(null)
-
-    const tryLoad = entry
-      ? window.vaultAPI.readImage(entry.absolutePath)
-      : Promise.resolve(null)
-
-    tryLoad
-      .then(async url => {
-        if (url) { setDataUrl(url); return }
-        // 3. 레지스트리 미스 → 볼트 전체 basename 탐색 (폴백)
-        if (window.vaultAPI?.findImageByName && normalizedRef) {
-          try {
-            const found = await window.vaultAPI.findImageByName(normalizedRef)
-            if (found) setDataUrl(found)
-          } catch { /* ignore — fallback unavailable */ }
-        }
-      })
-      .catch(() => { /* ignore load errors */ })
-      .finally(() => setIsLoading(false))
-  // originalRef를 deps에 포함하면 imageDataCache 갱신 시 자동 재실행
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingDocId, originalRef])
 
   return (
     <div className="flex flex-col h-full">
@@ -131,14 +103,9 @@ export default function ImageViewer() {
 
       {/* 이미지 영역 */}
       <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-        {isLoading && (
-          <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            로딩 중...
-          </div>
-        )}
-        {!isLoading && dataUrl && (
+        {imageUrl && !imgError ? (
           <img
-            src={dataUrl}
+            src={imageUrl}
             alt={displayName}
             style={{
               maxWidth: '100%',
@@ -146,20 +113,9 @@ export default function ImageViewer() {
               objectFit: 'contain',
               borderRadius: 6,
             }}
-            onError={() => {
-              // 캐시된 데이터가 깨진 경우 → findImageByName으로 재시도
-              setDataUrl(null)
-              if (window.vaultAPI?.findImageByName && normalizedRef) {
-                setIsLoading(true)
-                window.vaultAPI.findImageByName(normalizedRef)
-                  .then(found => { if (found) setDataUrl(found) })
-                  .catch(() => {})
-                  .finally(() => setIsLoading(false))
-              }
-            }}
+            onError={() => setImgError(true)}
           />
-        )}
-        {!isLoading && !dataUrl && (
+        ) : (
           <div className="text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
             <div>이미지를 불러올 수 없습니다</div>
             <div className="text-xs mt-1 font-mono opacity-60">{displayName}</div>
