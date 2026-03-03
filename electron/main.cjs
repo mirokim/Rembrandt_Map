@@ -309,24 +309,78 @@ function registerVaultIpcHandlers() {
   })
 
   // ── vault:find-image-by-name ──────────────────────────────────────────────────
-  // 레지스트리에 없는 경우를 위한 폴백: basename으로 볼트 전체를 재탐색
+  // 레지스트리에 없는 경우를 위한 폴백: basename으로 볼트 전체를 직접 탐색
+  // collectVaultContents 대신 독립적인 탐색 구현 (isDirectory 기반)
   ipcMain.handle('vault:find-image-by-name', (_event, filename) => {
     if (!filename || typeof filename !== 'string') return null
     if (!currentVaultPath) return null
-    const { images } = collectVaultContents(currentVaultPath, currentVaultPath)
-    const found = images.find(p => path.basename(p).toLowerCase() === filename.toLowerCase())
-    if (!found) return null
-    const ext = path.extname(found).slice(1).toLowerCase()
-    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-                      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
-    const mime = mimeMap[ext] ?? 'image/png'
-    try {
-      const buffer = fs.readFileSync(found)
-      return `data:${mime};base64,${buffer.toString('base64')}`
-    } catch (err) {
-      console.warn('[vault] find-image-by-name read failed:', err.message)
+
+    const MIME_MAP = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                       gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
+
+    function readAsDataUrl(absPath) {
+      try {
+        const ext = path.extname(absPath).slice(1).toLowerCase()
+        const mime = MIME_MAP[ext] ?? 'image/png'
+        const buffer = fs.readFileSync(absPath)
+        return `data:${mime};base64,${buffer.toString('base64')}`
+      } catch { return null }
+    }
+
+    // normalize: lowercase + spaces → underscores (matches graphBuilder imageId convention)
+    const normTarget = filename.toLowerCase().replace(/\s+/g, '_')
+    function normName(n) { return n.toLowerCase().replace(/\s+/g, '_') }
+
+    // ── Fast path: existsSync in common Obsidian attachment folders ──
+    // Windows existsSync is case-insensitive, so this works regardless of
+    // the actual case of the stored filename.
+    const COMMON = ['attachments', 'Attachments', 'assets', 'images', 'img', 'media', 'files']
+    for (const folder of COMMON) {
+      const candidate = path.join(currentVaultPath, folder, filename)
+      if (fs.existsSync(candidate)) {
+        const result = readAsDataUrl(candidate)
+        if (result) { console.log('[vault] find-image fast-path:', candidate); return result }
+      }
+    }
+    // Also try vault root directly
+    const rootCandidate = path.join(currentVaultPath, filename)
+    if (fs.existsSync(rootCandidate)) {
+      const result = readAsDataUrl(rootCandidate)
+      if (result) { console.log('[vault] find-image fast-path (root):', rootCandidate); return result }
+    }
+
+    // ── Slow path: recursive search using isDirectory() ──
+    function searchDir(dirPath, depth) {
+      if (depth > 8) return null
+      let entries
+      try { entries = fs.readdirSync(dirPath, { withFileTypes: true }) } catch { return null }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue
+        const fullPath = path.join(dirPath, entry.name)
+        // Name match (normalized comparison handles spaces vs underscores)
+        if (normName(entry.name) === normTarget) return fullPath
+        // Recurse into directories
+        let isDir = false
+        try { isDir = entry.isDirectory() } catch { /* ignore */ }
+        if (!isDir && !/\.\w{1,10}$/.test(entry.name)) {
+          // No extension + isDirectory() failed → try readdirSync as directory detection
+          try { fs.readdirSync(fullPath); isDir = true } catch { /* not a dir */ }
+        }
+        if (isDir) {
+          const result = searchDir(fullPath, depth + 1)
+          if (result) return result
+        }
+      }
       return null
     }
+
+    const found = searchDir(currentVaultPath, 0)
+    if (!found) {
+      console.warn('[vault] find-image-by-name: not found →', filename)
+      return null
+    }
+    console.log('[vault] find-image slow-path:', found)
+    return readAsDataUrl(found)
   })
 
   // ── vault:create-folder ───────────────────────────────────────────────────────

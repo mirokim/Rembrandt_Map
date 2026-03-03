@@ -61,10 +61,13 @@ export default function ImageViewer() {
         if (url) { setDataUrl(url); return }
         // 3. 레지스트리 미스 → 볼트 전체 basename 탐색 (폴백)
         if (window.vaultAPI?.findImageByName && normalizedRef) {
-          const found = await window.vaultAPI.findImageByName(normalizedRef)
-          if (found) setDataUrl(found)
+          try {
+            const found = await window.vaultAPI.findImageByName(normalizedRef)
+            if (found) setDataUrl(found)
+          } catch { /* ignore — fallback unavailable */ }
         }
       })
+      .catch(() => { /* ignore load errors */ })
       .finally(() => setIsLoading(false))
   // originalRef를 deps에 포함하면 imageDataCache 갱신 시 자동 재실행
   // eslint-disable-next-line react-hooks/exhaustive-deps
