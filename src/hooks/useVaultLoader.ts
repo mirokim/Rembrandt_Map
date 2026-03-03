@@ -132,8 +132,16 @@ export function useVaultLoader() {
             const registry = useVaultStore.getState().imagePathRegistry
             if (!registry) return
             // 모든 문서의 imageRefs 수집 (중복 제거)
+            // Obsidian embeds may use path-prefixed refs like ![[attachments/img.png]].
+            // imagePathRegistry is keyed by basename only, so resolve via basename fallback.
+            const resolveEntry = (ref: string) => {
+              if (registry[ref]) return { key: ref, entry: registry[ref] }
+              const basename = ref.split(/[/\\]/).pop() ?? ref
+              if (registry[basename]) return { key: basename, entry: registry[basename] }
+              return null
+            }
             const refsToPreload = [...new Set(
-              docs.flatMap(d => d.imageRefs ?? []).filter(ref => !!registry[ref])
+              docs.flatMap(d => d.imageRefs ?? []).filter(ref => !!resolveEntry(ref))
             )]
             if (refsToPreload.length === 0) return
             clearImageDataCache()
@@ -144,9 +152,9 @@ export function useVaultLoader() {
               const batch = refsToPreload.slice(i, i + BATCH)
               const results = await Promise.allSettled(
                 batch.map(async (ref) => {
-                  const entry = registry[ref]
-                  const dataUrl = await window.vaultAPI!.readImage(entry.absolutePath)
-                  return { ref, dataUrl }
+                  const resolved = resolveEntry(ref)!
+                  const dataUrl = await window.vaultAPI!.readImage(resolved.entry.absolutePath)
+                  return { ref: resolved.key, dataUrl }  // cache by basename key
                 })
               )
               const batchEntries: Record<string, string> = {}

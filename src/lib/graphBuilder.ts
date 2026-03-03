@@ -150,14 +150,17 @@ function buildImageNodes(
     if (!refs?.length) continue
 
     for (const ref of refs) {
-      const imageId = `img:${ref.toLowerCase().replace(/\s+/g, '_')}`
+      // Obsidian may embed images with path prefix: ![[attachments/img.png]]
+      // Strip any path component — imagePathRegistry is keyed by basename only
+      const basename = ref.split(/[/\\]/).pop() ?? ref
+      const imageId = `img:${basename.toLowerCase().replace(/\s+/g, '_')}`
 
       if (!imageNodeMap.has(imageId)) {
         imageNodeMap.set(imageId, {
           id: imageId,
           docId: imageId,
           speaker: 'unknown' as SpeakerId,
-          label: truncate(ref.replace(/\.[^.]+$/, ''), 36), // 확장자 제거 후 표시
+          label: truncate(basename.replace(/\.[^.]+$/, ''), 36), // 확장자 제거 후 표시
           isImage: true,
         })
       }
