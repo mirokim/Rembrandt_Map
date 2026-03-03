@@ -146,6 +146,17 @@ export default function ImageViewer() {
               objectFit: 'contain',
               borderRadius: 6,
             }}
+            onError={() => {
+              // 캐시된 데이터가 깨진 경우 → findImageByName으로 재시도
+              setDataUrl(null)
+              if (window.vaultAPI?.findImageByName && normalizedRef) {
+                setIsLoading(true)
+                window.vaultAPI.findImageByName(normalizedRef)
+                  .then(found => { if (found) setDataUrl(found) })
+                  .catch(() => {})
+                  .finally(() => setIsLoading(false))
+              }
+            }}
           />
         )}
         {!isLoading && !dataUrl && (

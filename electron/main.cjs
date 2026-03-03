@@ -86,6 +86,60 @@ function isInsideVault(vaultPath, filePath) {
 const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i
 
 /**
+ * Read an image file and return a base64 data URL.
+ * Detects the actual MIME type from file magic bytes rather than relying
+ * solely on the file extension — handles misnamed files (e.g. JPEG saved as .png).
+ * Returns null if the file is empty, unreadable, or not a known image format.
+ */
+function readImageAsDataUrl(absPath) {
+  let buffer
+  try {
+    buffer = fs.readFileSync(absPath)
+  } catch (err) {
+    console.warn('[vault] readImageAsDataUrl: readFileSync failed:', absPath, err.message)
+    return null
+  }
+  if (!buffer || buffer.length === 0) {
+    console.warn('[vault] readImageAsDataUrl: empty file:', absPath)
+    return null
+  }
+
+  // Detect MIME from magic bytes (more reliable than file extension)
+  let mime = null
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+    mime = 'image/png'
+  } else if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    mime = 'image/jpeg'
+  } else if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+    mime = 'image/gif'  // GIF87a or GIF89a
+  } else if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) {
+    mime = 'image/webp'
+  } else if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+    mime = 'image/bmp'
+  } else {
+    // SVG or fallback to extension
+    const head = buffer.slice(0, 64).toString('utf8')
+    if (head.includes('<svg') || head.includes('<?xml')) {
+      mime = 'image/svg+xml'
+    } else {
+      const ext = path.extname(absPath).slice(1).toLowerCase()
+      const byExt = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
+      mime = byExt[ext] ?? null
+    }
+  }
+
+  if (!mime) {
+    console.warn('[vault] readImageAsDataUrl: unrecognized format:', absPath)
+    return null
+  }
+  return `data:${mime};base64,${buffer.toString('base64')}`
+}
+
+/**
  * Recursively collect all .md files, image files, AND subdirectory paths in dirPath.
  * - Skips hidden dirs/files (starting with '.')
  * - Stops at depth > 10
@@ -295,17 +349,7 @@ function registerVaultIpcHandlers() {
     const resolved = path.resolve(filePath)
     if (currentVaultPath && !isInsideVault(currentVaultPath, resolved)) return null
     if (!fs.existsSync(resolved)) return null
-    const ext = path.extname(resolved).slice(1).toLowerCase()
-    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-                      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
-    const mime = mimeMap[ext] ?? 'image/png'
-    try {
-      const buffer = fs.readFileSync(resolved)
-      return `data:${mime};base64,${buffer.toString('base64')}`
-    } catch (err) {
-      console.warn('[vault] read-image failed:', err.message)
-      return null
-    }
+    return readImageAsDataUrl(resolved)
   })
 
   // ── vault:find-image-by-name ──────────────────────────────────────────────────
@@ -314,18 +358,6 @@ function registerVaultIpcHandlers() {
   ipcMain.handle('vault:find-image-by-name', (_event, filename) => {
     if (!filename || typeof filename !== 'string') return null
     if (!currentVaultPath) return null
-
-    const MIME_MAP = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-                       gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
-
-    function readAsDataUrl(absPath) {
-      try {
-        const ext = path.extname(absPath).slice(1).toLowerCase()
-        const mime = MIME_MAP[ext] ?? 'image/png'
-        const buffer = fs.readFileSync(absPath)
-        return `data:${mime};base64,${buffer.toString('base64')}`
-      } catch { return null }
-    }
 
     // normalize: lowercase + spaces → underscores (matches graphBuilder imageId convention)
     const normTarget = filename.toLowerCase().replace(/\s+/g, '_')
@@ -338,14 +370,14 @@ function registerVaultIpcHandlers() {
     for (const folder of COMMON) {
       const candidate = path.join(currentVaultPath, folder, filename)
       if (fs.existsSync(candidate)) {
-        const result = readAsDataUrl(candidate)
+        const result = readImageAsDataUrl(candidate)
         if (result) { console.log('[vault] find-image fast-path:', candidate); return result }
       }
     }
     // Also try vault root directly
     const rootCandidate = path.join(currentVaultPath, filename)
     if (fs.existsSync(rootCandidate)) {
-      const result = readAsDataUrl(rootCandidate)
+      const result = readImageAsDataUrl(rootCandidate)
       if (result) { console.log('[vault] find-image fast-path (root):', rootCandidate); return result }
     }
 
@@ -380,7 +412,7 @@ function registerVaultIpcHandlers() {
       return null
     }
     console.log('[vault] find-image slow-path:', found)
-    return readAsDataUrl(found)
+    return readImageAsDataUrl(found)
   })
 
   // ── vault:create-folder ───────────────────────────────────────────────────────
