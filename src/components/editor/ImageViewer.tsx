@@ -45,14 +45,26 @@ export default function ImageViewer() {
     }
 
     // 2. 캐시 미스 → IPC on-demand 로드
-    if (!window.vaultAPI || !imagePathRegistry) return
-    const entry = originalRef ? imagePathRegistry[originalRef] : null
-    if (!entry) return
+    if (!window.vaultAPI) return
+
+    const entry = originalRef ? imagePathRegistry?.[originalRef] : null
 
     setIsLoading(true)
     setDataUrl(null)
-    window.vaultAPI.readImage(entry.absolutePath)
-      .then(url => { if (url) setDataUrl(url) })
+
+    const tryLoad = entry
+      ? window.vaultAPI.readImage(entry.absolutePath)
+      : Promise.resolve(null)
+
+    tryLoad
+      .then(async url => {
+        if (url) { setDataUrl(url); return }
+        // 3. 레지스트리 미스 → 볼트 전체 basename 탐색 (폴백)
+        if (window.vaultAPI?.findImageByName && normalizedRef) {
+          const found = await window.vaultAPI.findImageByName(normalizedRef)
+          if (found) setDataUrl(found)
+        }
+      })
       .finally(() => setIsLoading(false))
   // originalRef를 deps에 포함하면 imageDataCache 갱신 시 자동 재실행
   // eslint-disable-next-line react-hooks/exhaustive-deps

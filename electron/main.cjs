@@ -308,6 +308,27 @@ function registerVaultIpcHandlers() {
     }
   })
 
+  // ── vault:find-image-by-name ──────────────────────────────────────────────────
+  // 레지스트리에 없는 경우를 위한 폴백: basename으로 볼트 전체를 재탐색
+  ipcMain.handle('vault:find-image-by-name', (_event, filename) => {
+    if (!filename || typeof filename !== 'string') return null
+    if (!currentVaultPath) return null
+    const { images } = collectVaultContents(currentVaultPath, currentVaultPath)
+    const found = images.find(p => path.basename(p).toLowerCase() === filename.toLowerCase())
+    if (!found) return null
+    const ext = path.extname(found).slice(1).toLowerCase()
+    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
+    const mime = mimeMap[ext] ?? 'image/png'
+    try {
+      const buffer = fs.readFileSync(found)
+      return `data:${mime};base64,${buffer.toString('base64')}`
+    } catch (err) {
+      console.warn('[vault] find-image-by-name read failed:', err.message)
+      return null
+    }
+  })
+
   // ── vault:create-folder ───────────────────────────────────────────────────────
   ipcMain.handle('vault:create-folder', (_event, folderPath) => {
     if (!folderPath || typeof folderPath !== 'string') throw new Error('Invalid folder path')

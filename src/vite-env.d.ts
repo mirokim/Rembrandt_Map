@@ -34,6 +34,8 @@ declare global {
       readFile(filePath: string): Promise<string | null>
       /** Read an image file as base64 data URL; returns null if not found or outside vault */
       readImage(filePath: string): Promise<string | null>
+      /** Fallback: search the vault for an image by filename (basename), returns data URL or null */
+      findImageByName?(filename: string): Promise<string | null>
       createFolder(folderPath: string): Promise<{ success: boolean; path: string }>
       moveFile(absolutePath: string, destFolderPath: string): Promise<{ success: boolean; newPath: string }>
     }

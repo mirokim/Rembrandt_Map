@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useSettingsStore, type ParagraphRenderQuality } from '@/stores/settingsStore'
@@ -35,12 +35,43 @@ export default function LoadingOverlay() {
     || (vaultPath !== null && !vaultReady)
     || (vaultReady && vaultPath !== null && !graphLayoutReady)
 
-  const [visible, setVisible] = useState(shouldShow)
+  // 품질 선택창이 노출됐다면 사용자가 "시작" 버튼을 누를 때까지 오버레이 유지
+  const [awaitingChoice, setAwaitingChoice] = useState(false)
+  const selectorShownRef = useRef(false)
+  // pendingFileCount는 로딩 완료 후 null이 되므로 선택창 표시 시점의 값을 기억
+  const frozenFileCountRef = useRef<number | null>(null)
+
+  // 선택창이 한 번이라도 보이면 플래그와 파일 수를 기록
+  if (shouldShowPerfSelector(pendingFileCount, paragraphRenderQuality)) {
+    selectorShownRef.current = true
+    if (pendingFileCount !== null) frozenFileCountRef.current = pendingFileCount
+  }
+
+  // 로딩 완료 시점에 선택창이 표시됐었다면 awaitingChoice = true
+  useEffect(() => {
+    if (!shouldShow && selectorShownRef.current) {
+      setAwaitingChoice(true)
+    }
+  }, [shouldShow])
+
+  const handleStart = useCallback(() => {
+    selectorShownRef.current = false
+    frozenFileCountRef.current = null
+    setAwaitingChoice(false)
+  }, [])
+
+  // 실제 오버레이 표시 조건: 로딩 중 OR 사용자 선택 대기 중
+  const effectiveShouldShow = shouldShow || awaitingChoice
+  // 선택창 표시 조건: 로딩 중에 조건이 맞거나, 사용자 응답 대기 중
+  const showSelector = awaitingChoice || shouldShowPerfSelector(pendingFileCount, paragraphRenderQuality)
+  const displayFileCount = frozenFileCountRef.current ?? pendingFileCount
+
+  const [visible, setVisible] = useState(effectiveShouldShow)
   const [fading, setFading] = useState(false)
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (shouldShow) {
+    if (effectiveShouldShow) {
       if (fadeTimer.current) clearTimeout(fadeTimer.current)
       setFading(false)
       setVisible(true)
@@ -52,7 +83,7 @@ export default function LoadingOverlay() {
       }, 700)
     }
     return () => { if (fadeTimer.current) clearTimeout(fadeTimer.current) }
-  }, [shouldShow, visible])
+  }, [effectiveShouldShow, visible])
 
   if (!visible) return null
 
@@ -170,8 +201,8 @@ export default function LoadingOverlay() {
           {loadingProgress > 0 && <span>{loadingProgress}%</span>}
         </div>
 
-        {/* 퍼포먼스 선택 — 파일 수가 많을 때 노출 */}
-        {shouldShowPerfSelector(pendingFileCount, paragraphRenderQuality) && (
+        {/* 퍼포먼스 선택 — 파일 수가 많을 때 노출, 선택 대기 중에도 유지 */}
+        {showSelector && (
           <div
             style={{
               marginTop: 8,
@@ -189,7 +220,7 @@ export default function LoadingOverlay() {
                 letterSpacing: '0.05em',
               }}
             >
-              {pendingFileCount}개 파일 감지됨 — 렌더링 품질 선택
+              {displayFileCount}개 파일 감지됨 — 렌더링 품질 선택
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               {QUALITY_OPTIONS.map(({ value, label, desc }) => {
@@ -223,6 +254,28 @@ export default function LoadingOverlay() {
                 )
               })}
             </div>
+            {/* 로딩 완료 후 사용자가 품질을 선택하고 시작하는 버튼 */}
+            {awaitingChoice && (
+              <button
+                onClick={handleStart}
+                style={{
+                  marginTop: 8,
+                  width: '100%',
+                  padding: '6px 0',
+                  borderRadius: 5,
+                  border: '1px solid var(--color-accent, #60a5fa)',
+                  background: 'rgba(96,165,250,0.15)',
+                  color: 'var(--color-accent, #60a5fa)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  letterSpacing: '0.04em',
+                  transition: 'all 0.15s',
+                }}
+              >
+                시작
+              </button>
+            )}
           </div>
         )}
       </div>

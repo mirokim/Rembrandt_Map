@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('vaultAPI', {
   /** Read an image file as base64 data URL; returns null if not found or outside vault */
   readImage: (filePath) => ipcRenderer.invoke('vault:read-image', filePath),
 
+  /** Fallback: find an image anywhere in the vault by its filename (basename search) */
+  findImageByName: (filename) => ipcRenderer.invoke('vault:find-image-by-name', filename),
+
   /** Create a directory (and any missing parents) inside the vault */
   createFolder: (folderPath) => ipcRenderer.invoke('vault:create-folder', folderPath),
 
