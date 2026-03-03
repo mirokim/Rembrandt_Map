@@ -174,7 +174,10 @@ function resolveImagePath(normalizedName) {
       if (normStr(e.name) === normalizedName) return full
       let isDir = false
       try { isDir = e.isDirectory() } catch { /* ignore */ }
-      if (!isDir && !/\.\w{1,10}$/.test(e.name)) {
+      // Always try readdirSync as fallback when isDirectory() fails or returns false.
+      // This correctly handles directories with file extensions (e.g. "assets.v2")
+      // and virtual/cloud filesystems where isDirectory() may be unreliable.
+      if (!isDir) {
         try { fs.readdirSync(full); isDir = true } catch { /* not a dir */ }
       }
       if (isDir) { const r = searchDir(full, depth + 1); if (r) return r }
@@ -220,8 +223,8 @@ function collectVaultContents(vaultPath, dirPath, depth) {
 
     // ── Strategy for Synology Drive / cloud-backed virtual filesystems ──
     // lstatSync can fail for "online-only" or Unicode-named files on virtual
-    // file systems.  Instead of relying on stat, we determine file type by
-    // extension (.md → file) and try readdirSync to detect directories.
+    // file systems.  We use entry.isDirectory() (from withFileTypes) which is
+    // reliable on most filesystems, then fall back to readdirSync for edge cases.
 
     // 1) If name ends with .md → collect as markdown file
     if (entry.name.toLowerCase().endsWith('.md')) {
@@ -237,11 +240,16 @@ function collectVaultContents(vaultPath, dirPath, depth) {
       continue
     }
 
-    // 3) Skip other non-directory files (have a file extension)
-    if (/\.\w{1,10}$/.test(entry.name)) continue
+    // 3) Check isDirectory() before skipping by extension.
+    //    Directories named like "3D.v2" or "assets.bak" have extensions but must
+    //    still be recursed — entry.isDirectory() detects them correctly.
+    let entryIsDir = false
+    try { entryIsDir = entry.isDirectory() } catch { /* ignore — fallthrough to step 4 */ }
 
-    // 4) Remaining entries (no extension) — try to recurse as directory.
-    //    readdirSync will throw if it's not a readable directory → caught below.
+    if (!entryIsDir && /\.\w{1,10}$/.test(entry.name)) continue  // non-dir file with extension
+
+    // 4) Either confirmed directory (entryIsDir=true) or no-extension entry
+    //    (virtual FS fallback: readdirSync determines if it's a readable directory).
     try {
       const relPath = path.relative(vaultPath, fullPath).replace(/\\/g, '/')
       folders.push(relPath)
@@ -583,7 +591,9 @@ if (!gotTheLock) {
         }
 
         const mime = detectMime(buffer, absPath) ?? 'application/octet-stream'
-        return new Response(buffer, {
+        // Uint8Array로 명시 변환: Electron 31에서 Node.js Buffer를 Response body로
+        // 직접 전달할 때 발생할 수 있는 호환성 문제를 방지함.
+        return new Response(new Uint8Array(buffer), {
           status: 200,
           headers: {
             'Content-Type': mime,

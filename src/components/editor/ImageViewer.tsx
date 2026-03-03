@@ -7,21 +7,22 @@ import { useVaultStore } from '@/stores/vaultStore'
  * ImageViewer — 이미지 노드 더블클릭 시 에디터 영역에 표시되는 뷰어.
  * editingDocId = 'img:{normalizedFilename}' 형태일 때 렌더링됨.
  *
- * 이미지는 rembrandt-img:// 커스텀 프로토콜을 통해 디스크에서 직접 로드됨.
- * 메인 프로세스의 protocol.handle 핸들러가 normalizedName → absolutePath 변환을
- * imagePathRegistry + 재귀 검색으로 해결하므로 렌더러 측 복잡도가 없음.
+ * 1차 시도: rembrandt-img:// 커스텀 프로토콜 (디스크 직접 로드, 인코딩 불필요)
+ * 2차 시도: vault:find-image-by-name IPC fallback (base64 data URL 반환)
+ *   → 프로토콜 핸들러 문제 발생 시 항상 이미지를 표시할 수 있도록 보장함.
  */
 export default function ImageViewer() {
   const { editingDocId, closeEditor, openInEditor } = useUIStore()
   const imagePathRegistry = useVaultStore(s => s.imagePathRegistry)
   const loadedDocuments = useVaultStore(s => s.loadedDocuments)
   const [imgError, setImgError] = useState(false)
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null)
 
   // 'img:my_image.png' → 'my_image.png'
   const normalizedRef = editingDocId?.startsWith('img:') ? editingDocId.slice(4) : null
 
-  // Reset error state when a different image is opened
-  useEffect(() => { setImgError(false) }, [normalizedRef])
+  // Reset state when a different image is opened
+  useEffect(() => { setImgError(false); setFallbackUrl(null) }, [normalizedRef])
 
   // Display name: try to recover original filename with spaces from registry
   const displayName = useMemo(() => {
@@ -37,11 +38,31 @@ export default function ImageViewer() {
     ? `rembrandt-img:///${encodeURIComponent(normalizedRef)}`
     : null
 
+  // onError: 프로토콜 실패 시 IPC fallback으로 재시도
+  const onImgError = () => {
+    if (fallbackUrl !== null) {
+      // fallback도 실패 → 최종 에러 표시
+      setImgError(true)
+      return
+    }
+    if (!normalizedRef || !window.vaultAPI?.findImageByName) {
+      setImgError(true)
+      return
+    }
+    window.vaultAPI.findImageByName(normalizedRef)
+      .then(dataUrl => { if (dataUrl) setFallbackUrl(dataUrl); else setImgError(true) })
+      .catch(() => setImgError(true))
+  }
+
   // 이 이미지를 ![[...]]로 참조하는 문서 목록
+  // ![[attachments/image.png]] 같은 경로 포함 ref도 basename만 비교
   const referencingDocs = useMemo(() => {
     if (!normalizedRef || !loadedDocuments) return []
     return loadedDocuments.filter(d =>
-      d.imageRefs?.some(r => r.toLowerCase().replace(/\s+/g, '_') === normalizedRef)
+      d.imageRefs?.some(r => {
+        const basename = r.split(/[/\\]/).pop() ?? r
+        return basename.toLowerCase().replace(/\s+/g, '_') === normalizedRef
+      })
     )
   }, [loadedDocuments, normalizedRef])
 
@@ -103,9 +124,9 @@ export default function ImageViewer() {
 
       {/* 이미지 영역 */}
       <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-        {imageUrl && !imgError ? (
+        {(fallbackUrl ?? imageUrl) && !imgError ? (
           <img
-            src={imageUrl}
+            src={(fallbackUrl ?? imageUrl)!}
             alt={displayName}
             style={{
               maxWidth: '100%',
@@ -113,7 +134,7 @@ export default function ImageViewer() {
               objectFit: 'contain',
               borderRadius: 6,
             }}
-            onError={() => setImgError(true)}
+            onError={onImgError}
           />
         ) : (
           <div className="text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
