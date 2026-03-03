@@ -23,7 +23,7 @@ describe('MOCK_DOCUMENTS', () => {
     expect(new Set(allSectionIds).size).toBe(allSectionIds.length)
   })
 
-  it('speaker distribution matches plan (Chief×3, Art×5, Plan×4, Level×4, Prog×4)', () => {
+  it('speaker distribution matches plan (Chief×3, Art×5, Plan×4, Level×4, Tech×4)', () => {
     const counts: Record<string, number> = {}
     for (const doc of MOCK_DOCUMENTS) {
       counts[doc.speaker] = (counts[doc.speaker] ?? 0) + 1

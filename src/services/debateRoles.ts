@@ -126,7 +126,7 @@ export const DEBATE_PROVIDER_LABELS: Record<string, string> = {
   art_director: 'Art',
   plan_director: 'Design',
   level_director: 'Level',
-  prog_director: 'Prog',
+  prog_director: 'Tech',
 }
 
 /** Accent color for each debate participant (provider or persona) */

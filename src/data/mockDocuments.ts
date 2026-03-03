@@ -3,7 +3,7 @@ import type { MockDocument } from '@/types'
 /**
  * 20 mock documents representing director feedback for Project ECHO (action RPG).
  * Section IDs double as wiki-link slugs.
- * Distribution: Chief×3, Art×5, Plan×4, Level×4, Prog×4
+ * Distribution: Chief×3, Art×5, Plan×4, Level×4, Tech×4
  */
 export const MOCK_DOCUMENTS: MockDocument[] = [
   // ── CHIEF DIRECTOR ────────────────────────────────────────────────────────

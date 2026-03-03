@@ -148,7 +148,7 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('Art')).toBeInTheDocument()
     expect(screen.getByText('Plan')).toBeInTheDocument()
     expect(screen.getByText('Level')).toBeInTheDocument()
-    expect(screen.getByText('Prog')).toBeInTheDocument()
+    expect(screen.getByText('Tech')).toBeInTheDocument()
   })
 
   // ── VaultSelector section ──────────────────────────────────────────────────

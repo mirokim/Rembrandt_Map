@@ -25,6 +25,21 @@ import {
   getClusterTopics,
 } from '@/lib/graphAnalysis'
 
+// ── Persona tag affinity map ──────────────────────────────────────────────────
+
+/**
+ * Maps each built-in director persona to its affinity tag.
+ * Documents tagged with this value are boosted during retrieval.
+ * Tags are matched case-insensitively.
+ */
+export const PERSONA_TAG_MAP: Record<string, string> = {
+  chief_director: 'chief',
+  art_director: 'art',
+  plan_director: 'design',
+  level_director: 'level',
+  prog_director: 'tech',
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface NeighborContext {
@@ -120,7 +135,8 @@ function buildSectionMap(
  */
 export function frontendKeywordSearch(
   query: string,
-  topN: number = 8
+  topN: number = 8,
+  currentSpeaker?: string
 ): SearchResult[] {
   const { loadedDocuments } = useVaultStore.getState()
   if (!loadedDocuments || loadedDocuments.length === 0) return []
@@ -131,11 +147,14 @@ export function frontendKeywordSearch(
     ? getCachedMaps(links, loadedDocuments).docMap
     : new Map(loadedDocuments.map(d => [d.id, d]))
 
+  const personaTag = currentSpeaker ? PERSONA_TAG_MAP[currentSpeaker] : undefined
+  const TAG_BOOST = 0.1
+
   // ── TF-IDF 우선 검색 ──────────────────────────────────────────────────────
   if (tfidfIndex.isBuilt) {
-    const tfidfHits = tfidfIndex.search(query, topN)
+    const tfidfHits = tfidfIndex.search(query, topN * 2)  // over-fetch for tag re-sort
     if (tfidfHits.length > 0) {
-      return tfidfHits.map(hit => {
+      const results = tfidfHits.map(hit => {
         const doc = docMap.get(hit.docId)
         // 문서 내에서 쿼리와 가장 잘 매칭되는 섹션 선택
         const queryStems = tokenizeQuery(query)
@@ -152,6 +171,10 @@ export function frontendKeywordSearch(
             }
           }
         }
+        const tags = doc?.tags ?? []
+        const hasPersonaTag = personaTag
+          ? tags.some(t => t.toLowerCase() === personaTag)
+          : false
         return {
           doc_id: hit.docId,
           filename: hit.filename,
@@ -163,10 +186,12 @@ export function frontendKeywordSearch(
               ? bestSection.body.slice(0, 400).trimEnd() + '…'
               : bestSection.body)
             : '',
-          score: hit.score,
-          tags: doc?.tags ?? [],
+          score: Math.min(1, hit.score + (hasPersonaTag ? TAG_BOOST : 0)),
+          tags,
         } satisfies SearchResult
       })
+      results.sort((a, b) => b.score - a.score)
+      return results.slice(0, topN)
     }
   }
 
@@ -200,8 +225,14 @@ export function frontendKeywordSearch(
       const coverage = matchedTerms / queryStems.length
       score = Math.min(1, score * 0.6 + coverage * 0.4)
 
+      const tags = doc.tags ?? []
+      const hasPersonaTag = personaTag
+        ? tags.some(t => t.toLowerCase() === personaTag)
+        : false
+      const boostedScore = Math.min(1, score + (hasPersonaTag ? TAG_BOOST : 0))
+
       scored.push({
-        score,
+        score: boostedScore,
         result: {
           doc_id: doc.id,
           filename: doc.filename,
@@ -211,8 +242,8 @@ export function frontendKeywordSearch(
           content: section.body.length > 400
             ? section.body.slice(0, 400).trimEnd() + '…'
             : section.body,
-          score,
-          tags: doc.tags ?? [],
+          score: boostedScore,
+          tags,
         },
       })
     }
@@ -379,11 +410,15 @@ export function rerankResults(
         ? 0.1
         : 0
 
+    // Tag affinity boost: doc tagged with persona's topic → 15% bonus
+    const pTag = currentSpeaker ? PERSONA_TAG_MAP[currentSpeaker] : undefined
+    const tagBoost = pTag && r.tags?.some(t => t.toLowerCase() === pTag) ? 0.15 : 0
+
     // Recency boost: recent docs get up to +5% (exponential decay, 90-day half-life)
     const recMs = (() => { const d = _docMap.get(r.doc_id); return d ? getDocRecency(d) : 0 })()
     const recencyBoost = recMs > 0 ? 0.05 * Math.exp(-(now - recMs) / RECENCY_DECAY_MS) : 0
 
-    const finalScore = 0.6 * r.score + 0.3 * keywordScore + speakerBoost + recencyBoost
+    const finalScore = 0.6 * r.score + 0.3 * keywordScore + speakerBoost + tagBoost + recencyBoost
 
     return { result: r, finalScore }
   })

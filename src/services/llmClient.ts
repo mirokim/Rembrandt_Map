@@ -14,6 +14,7 @@ import {
   tokenizeQuery,
 } from '@/lib/graphRAG'
 import { useGraphStore } from '@/stores/graphStore'
+import { useVaultStore } from '@/stores/vaultStore'
 
 // ── Obsidian MD conversion (MD 변환 에디터 파이프라인) ─────────────────────────
 
@@ -221,7 +222,7 @@ export async function fetchRAGContext(
     // 백엔드 결과가 없으면 프론트엔드 검색으로 보완
     // (백엔드 미실행, 미인덱싱, 빈 결과 모두 포함)
     if (candidates.length === 0) {
-      candidates = frontendKeywordSearch(userMessage, 8)
+      candidates = frontendKeywordSearch(userMessage, 8, currentSpeaker)
     }
 
     logger.debug(`[RAG] 검색 후보: ${candidates.length}개 (쿼리: "${userMessage.slice(0, 40)}")`)
@@ -235,6 +236,25 @@ export async function fetchRAGContext(
     const reranked = relevant.length > 0
       ? rerankResults(relevant, userMessage, 5, currentSpeaker)
       : []
+
+    // _index.md 우선 포함 — 볼트 인덱스 파일이 있으면 항상 첫 번째 컨텍스트로 보장
+    const { loadedDocuments: _vaultDocs } = useVaultStore.getState()
+    const indexDoc = _vaultDocs?.find(d => d.filename.toLowerCase() === '_index.md')
+    if (indexDoc && !reranked.some(r => r.doc_id === indexDoc.id)) {
+      const firstSection = indexDoc.sections.find(s => s.body.trim())
+      reranked.unshift({
+        doc_id: indexDoc.id,
+        filename: indexDoc.filename,
+        section_id: firstSection?.id ?? '',
+        heading: firstSection?.heading ?? '',
+        speaker: indexDoc.speaker,
+        content: firstSection
+          ? (firstSection.body.length > 600 ? firstSection.body.slice(0, 600).trimEnd() + '…' : firstSection.body)
+          : '',
+        score: 1.0,
+        tags: indexDoc.tags ?? [],
+      })
+    }
 
     // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
     // queryTerms 전달 → 패시지-레벨 검색으로 각 문서의 가장 관련된 섹션 선택

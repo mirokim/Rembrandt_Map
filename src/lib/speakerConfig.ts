@@ -42,7 +42,7 @@ export const SPEAKER_CONFIG: Record<SpeakerId, SpeakerMeta> = {
     role: '레벨 플로우 · 시야 유도 · 기믹 · 레이아웃',
   },
   prog_director: {
-    label: 'Prog',
+    label: 'Tech',
     color: '#2196f3',
     hex: 0x2196f3,
     darkBg: '#0d1f3c',
