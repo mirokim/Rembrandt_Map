@@ -26,6 +26,28 @@ export interface ProjectInfo {
   currentSituation: string
 }
 
+export const DEFAULT_RAG_INSTRUCTION =
+`문서 참조 우선순위:
+- _index.md 파일이 첨부된 경우 가장 먼저 읽어 프로젝트 전체 구조와 최신 현황을 파악하세요.
+- 여러 문서가 제공될 때는 날짜·수정일이 최신인 문서를 절대적 기준으로 삼아 가장 최근 상태를 기반으로 답변하세요.
+- 최신 문서와 과거 문서의 내용이 충돌할 경우, 반드시 최신 데이터를 우선 채택하고 다음을 모두 수행하세요:
+  1. 무엇이 어떻게 바뀌었는지 명확히 정리 (변경 전 vs 변경 후)
+  2. 왜 바뀌었는지 문서 맥락에서 추론
+  3. 이 변화가 프로젝트 방향에 시사하는 바(트렌드·리스크·기회)를 깊은 맥락으로 도출
+- 과거 데이터는 변화의 '맥락·배경'으로만 활용하고, 현재 상태 판단의 근거로 삼지 마세요.
+
+문서 분석 및 인사이트 도출:
+- 첨부된 문서들을 개별 요약하지 말고, 전체를 종합하여 패턴·리스크·기회를 식별하세요.
+- 여러 문서에 걸쳐 반복되는 이슈, 모순, 미결 사항을 적극적으로 찾아내세요.
+- 나의 디렉터 역할 관점에서 실행 가능한 권고안(액션 아이템)을 제시하세요.
+- 문서가 없는 경우에도 일반적인 게임 개발 지식으로 답변하되, 문서가 있으면 반드시 우선 활용하세요.
+- 문서 내용에서 근거가 있다면 패턴 분석·트렌드 추론·리스크 예측을 적극적으로 수행하세요.
+
+사실 정확성 원칙:
+- 이름, 날짜, 수치, 인용구 등 구체적 사실은 문서에 명시된 것만 사용하고 절대 지어내지 마세요.
+- 문서에서 확인되지 않는 구체적 사실이 필요한 경우 "문서에 없음"이라고 밝히고 일반 원칙으로 보완하세요.
+- 분석·해석·권고는 근거를 명시하면 허용됩니다. "이 문서들을 종합하면..." 형태로 출처를 드러내세요.`
+
 export const DEFAULT_RESPONSE_INSTRUCTIONS =
 `응답 원칙:
 - 질문자의 표면적 질문 너머 실제 의도와 맥락을 파악하여, 그것에 맞춰 더 깊고 실질적으로 답변하세요.
@@ -96,6 +118,8 @@ interface SettingsState {
   reportModelId: string
   /** Multi-agent RAG: cheap worker LLMs summarize secondary docs before chief responds */
   multiAgentRAG: boolean
+  /** Global RAG document-reference instructions (injected into every persona's system prompt) */
+  ragInstruction: string
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -126,6 +150,7 @@ interface SettingsState {
   setPersonaDocumentId: (personaId: string, docId: string | null) => void
   setReportModelId: (id: string) => void
   setMultiAgentRAG: (enabled: boolean) => void
+  setRagInstruction: (v: string) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -177,6 +202,7 @@ export const useSettingsStore = create<SettingsState>()(
       personaDocumentIds: {},
       reportModelId: 'claude-sonnet-4-6',
       multiAgentRAG: true,
+      ragInstruction: DEFAULT_RAG_INSTRUCTION,
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -289,6 +315,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setReportModelId: (reportModelId) => set({ reportModelId }),
       setMultiAgentRAG: (multiAgentRAG) => set({ multiAgentRAG }),
+      setRagInstruction: (ragInstruction) => set({ ragInstruction }),
     }),
     {
       name: 'rembrandt-settings',
@@ -311,6 +338,7 @@ export const useSettingsStore = create<SettingsState>()(
         personaDocumentIds: state.personaDocumentIds,
         reportModelId: state.reportModelId,
         multiAgentRAG: state.multiAgentRAG,
+        ragInstruction: state.ragInstruction,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {
