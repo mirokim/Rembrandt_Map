@@ -545,7 +545,10 @@ export async function streamMessage(
         if (compactSummary.trim()) {
           finalSystemPrompt += `\n\n## 이전 대화 요약 (자동 컴팩션)\n${compactSummary.trim()}`
           historyMessages = recentMessages
-          logger.debug(`[컴팩션] ${histChars}자 → 최근 8개 메시지 + 요약 주입`)
+          // 컴팩션 요약을 AI 장기 기억에도 자동 저장
+          const timestamp = new Date().toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          useMemoryStore.getState().appendToMemory(`[${timestamp} 자동 요약]\n${compactSummary.trim()}`)
+          logger.debug(`[컴팩션] ${histChars}자 → 최근 8개 메시지 + 요약 주입 + 기억 저장`)
         }
       }
     } catch (e) {
