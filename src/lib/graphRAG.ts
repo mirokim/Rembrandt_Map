@@ -511,7 +511,7 @@ export function rerankResults(
  * rawContent를 그대로 쓰지 않는 이유: rawContent는 YAML frontmatter를 포함하므로
  * AI가 "---\nspeaker: ...\ntags: ..." 등을 실제 내용으로 오독합니다.
  */
-function getStrippedBody(doc: LoadedDocument): string {
+export function getStrippedBody(doc: LoadedDocument): string {
   const sectionText = doc.sections
     .filter(s => s.body.trim())
     .map(s => {
