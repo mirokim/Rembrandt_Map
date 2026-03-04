@@ -216,14 +216,16 @@ export async function fetchRAGContext(
     // 파일명 매칭(score 2x)이 있으면 "명시적 문서 지목" 쿼리로 판단 (raw score >= 2 → 정규화 0.2)
     const hasStrongDirectHit = directHits.some(r => r.score >= 0.2)
 
-    // ── 강한 파일명 매칭: 전체 본문을 직접 주입 (BFS 예산 제한 우회) ─────────
-    // score >= 0.2 = 파일명에 쿼리 숫자/단어가 포함된 경우 (raw score ≥ 2 → 0.2)
-    // 이 경우 BFS의 1500자 제한을 무시하고 문서 전체(최대 6000자)를 즉시 반환
-    if (hasStrongDirectHit) {
+    // ── 강한 파일명 매칭 (score >= 0.4): 전체 본문 직접 주입 + BFS 연관 문서 보완 ──
+    // score >= 0.4 = raw >= 4 = 파일명에 쿼리 단어 2개 이상 매칭
+    // score >= 0.2 단일 매칭("회의", "문서" 등 일반 단어)은 오탐지 방지를 위해 BFS 시드로만 사용
+    const strongPinnedHits = directHits.filter(r => r.score >= 0.4)
+    if (strongPinnedHits.length > 0) {
       const { loadedDocuments: _docs } = useVaultStore.getState()
+      const docMap = new Map(_docs?.map(d => [d.id, d]) ?? [])
       const pinnedParts: string[] = ['## 직접 지목된 문서 (전체 내용)\n']
-      for (const hit of directHits.filter(r => r.score >= 0.2).slice(0, 3)) {
-        const doc = _docs?.find(d => d.id === hit.doc_id)
+      for (const hit of strongPinnedHits.slice(0, 3)) {
+        const doc = docMap.get(hit.doc_id)
         if (!doc) continue
         const body = getStrippedBody(doc)
         const truncated = body.length > 6000 ? body.slice(0, 6000).trimEnd() + '…' : body
@@ -231,9 +233,11 @@ export async function fetchRAGContext(
       }
       if (pinnedParts.length > 1) {
         const pinnedCtx = pinnedParts.join('')
-        logger.debug(`[RAG] 직접 문서 주입: ${pinnedCtx.length}자`)
-        useGraphStore.getState().setAiHighlightNodes(directHits.filter(r => r.score >= 0.2).map(r => r.doc_id))
-        return pinnedCtx
+        // 연관 문서도 BFS로 수집 (더 작은 예산으로 추가 컨텍스트 보완)
+        const bfsCtx = buildDeepGraphContext(directHits, 2, 10, tokenizeQuery(userMessage))
+        logger.debug(`[RAG] 직접 문서 주입: ${pinnedCtx.length}자, BFS 보완: ${bfsCtx.length}자`)
+        useGraphStore.getState().setAiHighlightNodes(directHits.map(r => r.doc_id))
+        return pinnedCtx + (bfsCtx ? '\n' + bfsCtx : '')
       }
     }
 

@@ -268,15 +268,11 @@ export function directVaultSearch(
   const { loadedDocuments } = useVaultStore.getState()
   if (!loadedDocuments?.length) return []
 
-  // 쿼리를 공백 기준 분리 (2자 이상만)
-  const rawTerms = query
-    .split(/\s+/)
-    .map(t => t.toLowerCase())
-    .filter(t => t.length >= 2)
-  // 한국어 날짜 표현에서 숫자 추출: "28일" → "28", "26년" → "26"
-  // ISO 파일명 "[2026.01.28]"의 숫자 컴포넌트와 매칭되도록 보완
+  // 토크나이저로 조사·구두점 제거 (한국어 조사 제거 포함, "이사장님의" → "이사장님")
+  const tokenized = _tokenize(query)
+  // 2자리 이상 숫자 보완: 날짜형 파일명 "[2026.01.28]"의 컴포넌트와 확실히 매칭되도록
   const numericTerms = query.match(/\d{2,}/g) ?? []
-  const terms = [...new Set([...rawTerms, ...numericTerms])]
+  const terms = [...new Set([...tokenized, ...numericTerms])]
   if (terms.length === 0) return []
 
   const scored: { doc: LoadedDocument; score: number; bestSection: DocSection | null }[] = []
@@ -288,7 +284,7 @@ export function directVaultSearch(
     let score = 0
     for (const term of terms) {
       if (filename.includes(term)) score += 2  // 파일명 매칭 2배 가중치
-      else if (raw.includes(term)) score += 1
+      if (raw.includes(term)) score += 1        // 본문 매칭 (파일명과 독립 집계)
     }
     if (score === 0) continue
 
