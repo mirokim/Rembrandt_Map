@@ -20,6 +20,17 @@ const VALID_SPEAKERS: Set<string> = new Set([
   'prog_director',
 ])
 
+/** Short-form aliases → canonical speaker ID */
+const SPEAKER_ALIASES: Record<string, string> = {
+  chief:  'chief_director',
+  art:    'art_director',
+  plan:   'plan_director',
+  design: 'plan_director',
+  level:  'level_director',
+  prog:   'prog_director',
+  tech:   'prog_director',
+}
+
 // ── filePathToDocId ────────────────────────────────────────────────────────────
 
 /**
@@ -124,10 +135,12 @@ export function parseMarkdownFile(file: VaultFile): LoadedDocument {
   const { data, content: body } = matter(file.content)
 
   // ── speaker ────────────────────────────────────────────────────────────────
-  const rawSpeaker = typeof data.speaker === 'string' ? data.speaker.trim() : ''
+  const rawSpeaker = typeof data.speaker === 'string' ? data.speaker.trim().toLowerCase() : ''
   const speaker: SpeakerId = VALID_SPEAKERS.has(rawSpeaker)
     ? (rawSpeaker as SpeakerId)
-    : 'unknown'
+    : rawSpeaker in SPEAKER_ALIASES
+      ? (SPEAKER_ALIASES[rawSpeaker] as SpeakerId)
+      : 'unknown'
 
   // ── date ───────────────────────────────────────────────────────────────────
   let date = ''
