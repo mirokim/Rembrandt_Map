@@ -36,7 +36,10 @@ function stemKorean(token: string): string[] {
 }
 
 export function tokenize(text: string): string[] {
-  const raw = text
+  // 한국어 숫자+단위 분리: "28일" → "28 일", "1월" → "1 월"
+  // 이렇게 해야 쿼리 "28일"의 "28"이 파일명 "[2026.01.28]"의 "28"과 매칭됨
+  const normalized = text.replace(/(\d+)(년|월|일|시|분|초|개|명|번|회|차)/g, '$1 $2')
+  const raw = normalized
     .toLowerCase()
     .split(/[\s,.\-_?!;:()[\]{}'"《》「」【】]+/)
     .filter(t => t.length > 1)
