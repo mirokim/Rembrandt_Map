@@ -31,7 +31,7 @@ function EnvHint({ provider }: { provider: string }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AITab() {
-  const { personaModels, setPersonaModel, apiKeys, setApiKey, responseInstructions, setResponseInstructions } = useSettingsStore()
+  const { personaModels, setPersonaModel, apiKeys, setApiKey, responseInstructions, setResponseInstructions, reportModelId, setReportModelId } = useSettingsStore()
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
 
   const toggleKeyVisibility = (id: string) =>
@@ -156,6 +156,42 @@ export default function AITab() {
               </div>
             )
           })}
+        </div>
+      </section>
+
+      <div style={{ borderTop: '1px solid var(--color-border)' }} />
+
+      {/* Report model */}
+      <section>
+        <h3 className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>보고서 AI 모델</h3>
+        <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>
+          대화 보고서를 AI가 요약·작성할 때 사용할 모델을 선택하세요. "사용 안 함" 선택 시 대화를 그대로 마크다운으로 출력합니다.
+        </p>
+        <div className="relative">
+          <select
+            value={reportModelId}
+            onChange={e => setReportModelId(e.target.value)}
+            className="w-full text-xs rounded px-2 py-1.5 appearance-none pr-6"
+            style={{
+              background: 'var(--color-bg-surface)',
+              color: 'var(--color-text-primary)',
+              border: '1px solid var(--color-border)',
+              outline: 'none',
+            }}
+          >
+            <option value="">사용 안 함 (기본 형식 출력)</option>
+            {Object.entries(GROUPED_OPTIONS).map(([provider, models]) => (
+              <optgroup key={provider} label={PROVIDER_LABELS[provider] ?? provider}>
+                {models.map(m => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <span
+            className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[10px]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >▾</span>
         </div>
       </section>
 

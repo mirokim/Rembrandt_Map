@@ -90,6 +90,10 @@ interface SettingsState {
   folderColors: Record<string, string>
   /** Global AI response format instructions (appended to every persona's system prompt) */
   responseInstructions: string
+  /** Vault document IDs injected into each persona's system prompt as persona context */
+  personaDocumentIds: Record<string, string>
+  /** Model ID used for AI-generated conversation reports. Empty string = static format only. */
+  reportModelId: string
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -117,6 +121,8 @@ interface SettingsState {
   setTagColor: (tag: string, color: string) => void
   setFolderColor: (folderPath: string, color: string) => void
   setResponseInstructions: (v: string) => void
+  setPersonaDocumentId: (personaId: string, docId: string | null) => void
+  setReportModelId: (id: string) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -165,6 +171,8 @@ export const useSettingsStore = create<SettingsState>()(
       tagColors: {},
       folderColors: {},
       responseInstructions: DEFAULT_RESPONSE_INSTRUCTIONS,
+      personaDocumentIds: {},
+      reportModelId: 'claude-sonnet-4-6',
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -267,6 +275,15 @@ export const useSettingsStore = create<SettingsState>()(
         set((s) => ({ folderColors: { ...s.folderColors, [folderPath]: color } })),
 
       setResponseInstructions: (responseInstructions) => set({ responseInstructions }),
+
+      setPersonaDocumentId: (personaId, docId) =>
+        set((s) => ({
+          personaDocumentIds: docId
+            ? { ...s.personaDocumentIds, [personaId]: docId }
+            : Object.fromEntries(Object.entries(s.personaDocumentIds).filter(([k]) => k !== personaId)),
+        })),
+
+      setReportModelId: (reportModelId) => set({ reportModelId }),
     }),
     {
       name: 'rembrandt-settings',
@@ -286,6 +303,8 @@ export const useSettingsStore = create<SettingsState>()(
         tagColors: state.tagColors,
         folderColors: state.folderColors,
         responseInstructions: state.responseInstructions,
+        personaDocumentIds: state.personaDocumentIds,
+        reportModelId: state.reportModelId,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {

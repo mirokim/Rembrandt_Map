@@ -299,7 +299,7 @@ export async function streamMessage(
   attachments?: Attachment[],
   overrideRagContext?: string   // 키워드 검색 우회 — 노드 선택 AI 분석 등에 사용
 ): Promise<void> {
-  const { personaModels, projectInfo, directorBios, customPersonas, personaPromptOverrides, responseInstructions } = useSettingsStore.getState()
+  const { personaModels, projectInfo, directorBios, customPersonas, personaPromptOverrides, responseInstructions, personaDocumentIds } = useSettingsStore.getState()
 
   // Resolve persona — may be a built-in director or a custom persona
   const customPersona = customPersonas.find(p => p.id === persona)
@@ -333,12 +333,23 @@ export async function streamMessage(
   const directorBio = customPersona ? undefined : directorBios[persona as DirectorId]
   const projectContext = buildProjectContext(projectInfo, directorBio)
 
+  // ── Persona document injection ──────────────────────────────────────────────
+  // 설정에서 이 페르소나에 연결된 볼트 문서가 있으면 시스템 프롬프트에 주입
+  const personaDocId = personaDocumentIds[persona]
+  let personaDocContext = ''
+  if (personaDocId) {
+    const doc = useVaultStore.getState().loadedDocuments?.find(d => d.id === personaDocId)
+    if (doc) {
+      personaDocContext = `\n\n---\n아래는 "${doc.filename}" 문서에서 가져온 페르소나 참고 자료입니다. 이 내용을 바탕으로 해당 인물의 관점과 어투를 참고하세요:\n\n${doc.rawContent.slice(0, 4000)}`
+    }
+  }
+
   // ── Graph-Augmented RAG context injection ──────────────────────────────────
   // overrideRagContext가 있으면 키워드 검색 없이 그대로 사용 (노드 직접 선택 분석 등)
   const ragContext = overrideRagContext !== undefined
     ? overrideRagContext
     : await fetchRAGContext(userMessage, persona)
-  const systemPrompt = projectContext + basePrompt + (responseInstructions.trim() ? '\n\n' + responseInstructions.trim() : '')
+  const systemPrompt = projectContext + basePrompt + personaDocContext + (responseInstructions.trim() ? '\n\n' + responseInstructions.trim() : '')
 
   // ── Attachment processing ───────────────────────────────────────────────────
   // Separate image attachments (→ vision API) from text attachments (→ message injection)

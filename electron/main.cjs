@@ -148,22 +148,35 @@ function buildNormalizedImageMap(registry) {
  * 3. Slow recursive directory search (fallback of last resort)
  */
 function resolveImagePath(normalizedName) {
-  // 1. Registry lookup (O(1))
+  function normStr(s) { return s.toLowerCase().replace(/\s+/g, '_') }
+  // Obsidian stores images with a numeric sender-id prefix (e.g. "411542267_image.png")
+  // but wikilinks often omit the prefix. Match if the registry key ends with '_' + normalizedName.
+  function isMatch(candidate) {
+    return candidate === normalizedName || candidate.endsWith('_' + normalizedName)
+  }
+
+  // 1. Registry lookup — exact then suffix match
   const fromRegistry = currentNormalizedImageMap[normalizedName]
   if (fromRegistry && fs.existsSync(fromRegistry)) return fromRegistry
+  // Suffix scan (O(n) over registry, only when exact lookup fails)
+  for (const [key, absPath] of Object.entries(currentNormalizedImageMap)) {
+    if (isMatch(key) && fs.existsSync(absPath)) return absPath
+  }
 
   if (!currentVaultPath) return null
 
-  // 2. Fast path: common Obsidian attachment folders
+  // 2. Fast path: scan common Obsidian attachment folders with normalized + suffix comparison.
   const COMMON = ['attachments', 'Attachments', 'assets', 'images', 'img', 'media', 'files']
   for (const folder of COMMON) {
-    // Try normalized name (underscores) — Windows FS is case-insensitive but not space-insensitive
-    const c1 = path.join(currentVaultPath, folder, normalizedName)
-    if (fs.existsSync(c1)) return c1
+    const folderPath = path.join(currentVaultPath, folder)
+    let names
+    try { names = fs.readdirSync(folderPath) } catch { continue }
+    for (const name of names) {
+      if (isMatch(normStr(name))) return path.join(folderPath, name)
+    }
   }
 
-  // 3. Slow path: recursive search with normalized name comparison
-  function normStr(s) { return s.toLowerCase().replace(/\s+/g, '_') }
+  // 3. Slow path: recursive search with normalized + suffix comparison
   function searchDir(dir, depth) {
     if (depth > 8) return null
     let entries
@@ -171,15 +184,11 @@ function resolveImagePath(normalizedName) {
     for (const e of entries) {
       if (e.name.startsWith('.')) continue
       const full = path.join(dir, e.name)
-      if (normStr(e.name) === normalizedName) return full
+      if (isMatch(normStr(e.name))) return full
+      // Prefer e.isDirectory(), fall back to statSync to follow symlinks/junctions
       let isDir = false
       try { isDir = e.isDirectory() } catch { /* ignore */ }
-      // Always try readdirSync as fallback when isDirectory() fails or returns false.
-      // This correctly handles directories with file extensions (e.g. "assets.v2")
-      // and virtual/cloud filesystems where isDirectory() may be unreliable.
-      if (!isDir) {
-        try { fs.readdirSync(full); isDir = true } catch { /* not a dir */ }
-      }
+      if (!isDir) { try { isDir = fs.statSync(full).isDirectory() } catch { /* ignore */ } }
       if (isDir) { const r = searchDir(full, depth + 1); if (r) return r }
     }
     return null
@@ -422,7 +431,7 @@ function registerVaultIpcHandlers() {
     if (!filename || typeof filename !== 'string') return null
     const normName = filename.toLowerCase().replace(/\s+/g, '_')
     const absPath = resolveImagePath(normName)
-    if (!absPath) { console.warn('[vault] find-image-by-name: not found →', filename); return null }
+    if (!absPath) return null
     return readImageAsDataUrl(absPath)
   })
 
@@ -571,7 +580,7 @@ if (!gotTheLock) {
     // ── rembrandt-img:// protocol — serve vault images directly from disk ──────
     // This replaces the data-URL/IPC approach: no base64 encoding, no size limits,
     // no MIME guessing in the renderer. The browser loads images natively.
-    protocol.handle('rembrandt-img', (request) => {
+    protocol.handle('rembrandt-img', async (request) => {
       try {
         const url = new URL(request.url)
         // URL: rembrandt-img:///image-2025-6-30_12-13-7.png
@@ -585,14 +594,13 @@ if (!gotTheLock) {
           return new Response(null, { status: 404 })
         }
 
+        // Use async read to avoid blocking the main process for large images
         let buffer
-        try { buffer = fs.readFileSync(absPath) } catch {
+        try { buffer = await fs.promises.readFile(absPath) } catch {
           return new Response(null, { status: 500 })
         }
 
         const mime = detectMime(buffer, absPath) ?? 'application/octet-stream'
-        // Uint8Array로 명시 변환: Electron 31에서 Node.js Buffer를 Response body로
-        // 직접 전달할 때 발생할 수 있는 호환성 문제를 방지함.
         return new Response(new Uint8Array(buffer), {
           status: 200,
           headers: {

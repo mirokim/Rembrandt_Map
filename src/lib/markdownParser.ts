@@ -188,6 +188,29 @@ export function parseMarkdownFile(file: VaultFile): LoadedDocument {
 // ── parseVaultFiles ───────────────────────────────────────────────────────────
 
 /**
+ * Resolve ID collision: if doc.id already exists in seenIds, append _2, _3, …
+ * Mutates `results` and `seenIds` as a side effect, returns the final doc.
+ */
+function pushWithUniqueId(
+  doc: LoadedDocument,
+  relativePath: string,
+  results: LoadedDocument[],
+  seenIds: Set<string>,
+): void {
+  if (seenIds.has(doc.id)) {
+    let n = 2
+    while (seenIds.has(`${doc.id}_${n}`)) n++
+    const newId = `${doc.id}_${n}`
+    logger.warn(`[markdownParser] ID 충돌: "${doc.id}" (${relativePath}) → "${newId}"`)
+    results.push({ ...doc, id: newId })
+    seenIds.add(newId)
+  } else {
+    seenIds.add(doc.id)
+    results.push(doc)
+  }
+}
+
+/**
  * Batch-parse an array of VaultFiles into LoadedDocuments.
  * Skips files that fail to parse (with a console.warn).
  */
@@ -196,19 +219,7 @@ export function parseVaultFiles(files: VaultFile[]): LoadedDocument[] {
   const seenIds = new Set<string>()
   for (const file of files) {
     try {
-      const doc = parseMarkdownFile(file)
-      if (seenIds.has(doc.id)) {
-        // ID 충돌 시 숫자 접미사를 붙여 유일성 보장
-        let n = 2
-        while (seenIds.has(`${doc.id}_${n}`)) n++
-        const newId = `${doc.id}_${n}`
-        logger.warn(`[markdownParser] ID 충돌: "${doc.id}" (${file.relativePath}) → "${newId}"`)
-        results.push({ ...doc, id: newId })
-        seenIds.add(newId)
-      } else {
-        seenIds.add(doc.id)
-        results.push(doc)
-      }
+      pushWithUniqueId(parseMarkdownFile(file), file.relativePath, results, seenIds)
     } catch (err) {
       logger.warn(`[markdownParser] Failed to parse ${file.relativePath}:`, err)
     }
@@ -239,18 +250,7 @@ export async function parseVaultFilesAsync(
   for (let i = 0; i < total; i++) {
     const file = files[i]
     try {
-      const doc = parseMarkdownFile(file)
-      if (seenIds.has(doc.id)) {
-        let n = 2
-        while (seenIds.has(`${doc.id}_${n}`)) n++
-        const newId = `${doc.id}_${n}`
-        logger.warn(`[markdownParser] ID 충돌: "${doc.id}" (${file.relativePath}) → "${newId}"`)
-        results.push({ ...doc, id: newId })
-        seenIds.add(newId)
-      } else {
-        seenIds.add(doc.id)
-        results.push(doc)
-      }
+      pushWithUniqueId(parseMarkdownFile(file), file.relativePath, results, seenIds)
     } catch (err) {
       logger.warn(`[markdownParser] Failed to parse ${file.relativePath}:`, err)
     }

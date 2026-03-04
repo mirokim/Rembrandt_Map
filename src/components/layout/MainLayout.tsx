@@ -9,6 +9,7 @@ import SettingsPanel from '@/components/settings/SettingsPanel'
 import ConverterEditor from '@/components/converter/ConverterEditor'
 import MarkdownEditor from '@/components/editor/MarkdownEditor'
 import ImageViewer from '@/components/editor/ImageViewer'
+import ReportViewer from '@/components/editor/ReportViewer'
 import PhysicsControls from '@/components/graph/PhysicsControls'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -171,11 +172,13 @@ export default function MainLayout() {
                   ...glassPanelStyle,
                 }}
               >
-                {editingDocId?.startsWith('img:')
+                {editingDocId?.startsWith('gallery:')
                   ? <ImageViewer />
-                  : editingDocId
-                    ? <MarkdownEditor />
-                    : <ConverterEditor />
+                  : editingDocId?.startsWith('report:')
+                    ? <ReportViewer />
+                    : editingDocId
+                      ? <MarkdownEditor />
+                      : <ConverterEditor />
                 }
               </motion.div>
             )}

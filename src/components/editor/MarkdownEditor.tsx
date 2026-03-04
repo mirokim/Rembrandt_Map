@@ -331,11 +331,11 @@ export default function MarkdownEditor() {
   const handleLinkClickRef = useRef(handleLinkClick)
   handleLinkClickRef.current = handleLinkClick
 
-  // 잠금 상태에서 ![[image.png]] 클릭 시 이미지 뷰어 열기
-  const handleImageClick = useCallback((ref: string) => {
-    const normalized = ref.toLowerCase().replace(/\s+/g, '_')
-    openInEditor(`img:${normalized}`)
-  }, [openInEditor])
+  // 잠금 상태에서 ![[image.png]] 클릭 시 이미지 갤러리 열기
+  // 클릭한 이미지가 속한 문서의 갤러리 노드(gallery:{docId})를 엽니다.
+  const handleImageClick = useCallback((_ref: string) => {
+    if (editingDocId) openInEditor(`gallery:${editingDocId}`)
+  }, [openInEditor, editingDocId])
 
   const handleImageClickRef = useRef(handleImageClick)
   handleImageClickRef.current = handleImageClick

@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
+import { FileText } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
+import { useUIStore } from '@/stores/uiStore'
 import MessageBubble from './MessageBubble'
 
 export default function MessageList() {
   const { messages, isLoading } = useChatStore()
+  const { openInEditor } = useUIStore()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom on new messages
@@ -11,12 +14,14 @@ export default function MessageList() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
+  const hasMessages = messages.length > 0
+
   return (
     <div
       className="flex-1 overflow-y-auto px-3 py-3"
       data-testid="message-list"
     >
-      {messages.length === 0 && !isLoading ? (
+      {!hasMessages && !isLoading ? (
         <div
           className="flex items-center justify-center h-full text-xs"
           style={{ color: 'var(--color-text-muted)' }}
@@ -47,6 +52,26 @@ export default function MessageList() {
                   }}
                 />
               ))}
+            </div>
+          )}
+
+          {/* Report viewer button — appears after last message */}
+          {hasMessages && !isLoading && (
+            <div className="flex justify-center mt-3 mb-1">
+              <button
+                onClick={() => openInEditor('report:latest')}
+                className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-full transition-colors hover:bg-[var(--color-bg-hover)]"
+                style={{
+                  color: 'var(--color-text-muted)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg-surface)',
+                  cursor: 'pointer',
+                }}
+                title="대화 내용을 보고서로 보기"
+              >
+                <FileText size={10} />
+                보고서 보기
+              </button>
             </div>
           )}
         </>

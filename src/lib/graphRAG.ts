@@ -560,10 +560,10 @@ function bfsFromDocIds(
  * 조정 가이드: 응답 품질보다 커버리지가 중요하면 늘리고,
  * 비용/속도가 우선이면 줄이세요.
  */
-const DEEP_CONTEXT_BUDGET = 16000
+const DEEP_CONTEXT_BUDGET = 16_000
 
 /** 홉 거리별 문서당 최대 내용 길이 (chars) */
-const HOP_CHAR_BUDGET = [1500, 900, 500, 250] as const
+const HOP_CHAR_BUDGET = [1_500, 900, 500, 250] as const
 
 /**
  * BFS로 그래프를 탐색하여 연결된 문서들의 내용을 수집.

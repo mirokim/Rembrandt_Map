@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, RotateCcw, Trash, Plus } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { ChevronDown, ChevronRight, RotateCcw, Trash, Plus, X } from 'lucide-react'
 import { useSettingsStore, type CustomPersona } from '@/stores/settingsStore'
+import { useVaultStore } from '@/stores/vaultStore'
 import { PERSONA_PROMPTS } from '@/lib/personaPrompts'
 import { DEFAULT_PERSONA_MODELS } from '@/lib/modelConfig'
 import { SPEAKER_CONFIG, SPEAKER_IDS } from '@/lib/speakerConfig'
@@ -19,6 +20,148 @@ function computeDarkBg(hex: string): string {
 
 const DEFAULT_SYSTEM_PROMPT_TEMPLATE = (label: string) =>
   `당신은 게임 개발 스튜디오의 ${label} 디렉터입니다.\n\n역할과 책임:\n- \n\n커뮤니케이션 스타일:\n- `
+
+// ── DocPickerField ─────────────────────────────────────────────────────────────
+
+/**
+ * 특정 페르소나에 볼트 문서를 연결하는 검색+선택 UI.
+ * 선택된 문서의 내용이 해당 페르소나의 시스템 프롬프트에 주입됩니다.
+ */
+function DocPickerField({ personaId }: { personaId: string }) {
+  const loadedDocuments = useVaultStore(s => s.loadedDocuments)
+  const { personaDocumentIds, setPersonaDocumentId } = useSettingsStore()
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+
+  const selectedDocId = personaDocumentIds[personaId] ?? null
+  const selectedDoc = useMemo(
+    () => loadedDocuments?.find(d => d.id === selectedDocId) ?? null,
+    [loadedDocuments, selectedDocId]
+  )
+
+  const filtered = useMemo(() => {
+    if (!loadedDocuments || !query.trim()) return []
+    const q = query.toLowerCase()
+    // Filename match first; content search limited to first 300 chars to avoid O(n×m) cost
+    return loadedDocuments
+      .filter(d =>
+        d.filename.toLowerCase().includes(q) ||
+        d.rawContent.slice(0, 300).toLowerCase().includes(q)
+      )
+      .slice(0, 10)
+  }, [loadedDocuments, query])
+
+  if (!loadedDocuments) {
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <label style={fieldLabelStyle}>페르소나 참고 문서</label>
+        <p style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>볼트를 먼저 로드하세요.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <label style={fieldLabelStyle}>페르소나 참고 문서</label>
+      {selectedDoc ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              flex: 1,
+              fontSize: 11,
+              padding: '4px 8px',
+              border: '1px solid var(--color-accent)',
+              borderRadius: 5,
+              background: 'rgba(59,130,246,0.07)',
+              color: 'var(--color-accent)',
+              fontFamily: 'monospace',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={selectedDoc.filename}
+          >
+            {selectedDoc.filename}
+          </span>
+          <button
+            onClick={() => setPersonaDocumentId(personaId, null)}
+            style={{ flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '2px 4px' }}
+            title="연결 해제"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ) : (
+        <div style={{ position: 'relative' }}>
+          <input
+            type="text"
+            value={query}
+            onChange={e => { setQuery(e.target.value); setOpen(true) }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            placeholder="문서 파일명 또는 키워드 검색..."
+            style={{ ...fieldInputStyle, paddingRight: 8 }}
+          />
+          {open && filtered.length > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                zIndex: 50,
+                border: '1px solid var(--color-border)',
+                borderRadius: 5,
+                background: 'var(--color-bg-surface)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                maxHeight: 180,
+                overflowY: 'auto',
+              }}
+            >
+              {filtered.map(doc => (
+                <button
+                  key={doc.id}
+                  onMouseDown={() => {
+                    setPersonaDocumentId(personaId, doc.id)
+                    setQuery('')
+                    setOpen(false)
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '5px 10px',
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom: '1px solid var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={doc.filename}
+                >
+                  {doc.filename}
+                  {doc.folderPath && (
+                    <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
+                      ({doc.folderPath})
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <p style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 3 }}>
+        선택한 문서의 내용이 이 페르소나의 시스템 프롬프트에 주입됩니다.
+      </p>
+    </div>
+  )
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -176,6 +319,9 @@ export default function PersonasTab() {
                         style={{ ...fieldInputStyle, resize: 'vertical', lineHeight: 1.6 }}
                       />
                     </div>
+
+                    {/* Persona document injection */}
+                    <DocPickerField personaId={id} />
 
                     {/* System prompt editor */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
@@ -478,6 +624,9 @@ export default function PersonasTab() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Persona document injection */}
+                      <DocPickerField personaId={persona.id} />
 
                       <div>
                         <label style={fieldLabelStyle}>시스템 프롬프트</label>
