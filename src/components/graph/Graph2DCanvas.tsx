@@ -172,11 +172,43 @@ export default function Graph2DCanvas({ width, height }: Props) {
       ctx.textAlign = 'center'
       // Font size in graph-space so screen size stays ~11px regardless of zoom
       ctx.font = `${11 / scale}px ui-monospace, monospace`
-      for (const simNode of simNodes) {
+
+      // Density-aware culling: minimum screen-space gap between label centers
+      // At low zoom, only draw labels for selected node + high-degree hubs
+      const MIN_SCREEN_GAP = 48  // px between label positions on screen
+      const drawnScreenPos: Array<{ sx: number; sy: number }> = []
+      const maxDeg = maxDegreeRef.current
+
+      // Sort: selected node first, then by degree descending (hubs get priority)
+      const sorted = [...simNodes].sort((a, b) => {
+        if (a.id === selId) return -1
+        if (b.id === selId) return 1
+        return (degreeMapRef.current.get(b.id) ?? 0) - (degreeMapRef.current.get(a.id) ?? 0)
+      })
+
+      for (const simNode of sorted) {
         const nodeData = nodeMap.get(simNode.id)
         if (!nodeData) continue
+
+        const deg = degreeMapRef.current.get(simNode.id) ?? 0
+        const isSelected = simNode.id === selId
+
+        // At low zoom (< 0.4), only show selected + top-tier hubs (top 15% degree)
+        if (!isSelected && scale < 0.4 && deg < maxDeg * 0.15) continue
+
+        // Screen-space position
+        const sx = simNode.x * scale + tx
+        const sy = simNode.y * scale + ty
+
+        // Skip if too close to an already-drawn label (overlap prevention)
+        const tooClose = !isSelected && drawnScreenPos.some(
+          p => Math.abs(p.sx - sx) < MIN_SCREEN_GAP && Math.abs(p.sy - sy) < MIN_SCREEN_GAP
+        )
+        if (tooClose) continue
+
+        drawnScreenPos.push({ sx, sy })
         const label = nodeData.label.length > 16 ? nodeData.label.slice(0, 15) + '…' : nodeData.label
-        ctx.globalAlpha = simNode.id === selId ? 0.95 : 0.7
+        ctx.globalAlpha = isSelected ? 0.95 : 0.7
         ctx.fillText(label, simNode.x, simNode.y + 16 / scale)
       }
     }

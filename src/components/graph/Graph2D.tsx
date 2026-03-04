@@ -53,6 +53,66 @@ export default function Graph2D({ width, height }: Props) {
   const selectedNodeIdRef = useRef(selectedNodeId)
   selectedNodeIdRef.current = selectedNodeId
 
+  // Degree map refs — stable access from tick/zoom callbacks (no stale closure)
+  const degreeMapRef = useRef(degreeMap)
+  degreeMapRef.current = degreeMap
+  const maxDegreeRef = useRef(maxDegree)
+  maxDegreeRef.current = maxDegree
+  const showNodeLabelsRef = useRef(showNodeLabels)
+  showNodeLabelsRef.current = showNodeLabels
+
+  // Last sim nodes for culling after zoom
+  const lastSimNodesRef = useRef<SimNode[]>([])
+  // Throttle counter — cull every N ticks only
+  const cullTickCountRef = useRef(0)
+
+  /** Screen-space overlap culling for SVG labels.
+   *  Hides labels that are too close to higher-priority (hub) labels.
+   *  Also counter-scales font size so labels stay ~11px on screen. */
+  const cullSVGLabels = useCallback((simNodes: SimNode[]) => {
+    if (!showNodeLabelsRef.current) return
+    const { scale, x: tx, y: ty } = viewRef.current
+    const MIN_GAP = 48
+    const labelMap = labelEls.current
+    const dMap = degreeMapRef.current
+    const maxDeg = maxDegreeRef.current
+    const selId = selectedNodeIdRef.current
+
+    const sorted = [...simNodes].sort((a, b) => {
+      if (a.id === selId) return -1
+      if (b.id === selId) return 1
+      return (dMap.get(b.id) ?? 0) - (dMap.get(a.id) ?? 0)
+    })
+
+    const shown: Array<{ sx: number; sy: number }> = []
+    const fontSize = `${11 / scale}px`
+
+    for (const node of sorted) {
+      const lEl = labelMap.get(node.id)
+      if (!lEl) continue
+      const isSelected = node.id === selId
+      const deg = dMap.get(node.id) ?? 0
+
+      if (!isSelected && scale < 0.4 && deg < maxDeg * 0.15) {
+        lEl.style.opacity = '0'
+        continue
+      }
+
+      const sx = node.x * scale + tx
+      const sy = node.y * scale + ty
+      const tooClose = !isSelected && shown.some(
+        p => Math.abs(p.sx - sx) < MIN_GAP && Math.abs(p.sy - sy) < MIN_GAP
+      )
+      if (tooClose) {
+        lEl.style.opacity = '0'
+      } else {
+        shown.push({ sx, sy })
+        lEl.style.opacity = isSelected ? '0.95' : '0.7'
+        lEl.style.fontSize = fontSize
+      }
+    }
+  }, [])  // stable — all data accessed via refs
+
   // Pan/zoom refs — using refs (not state) to avoid re-renders that would reset imperative cx/cy
   const svgRef = useRef<SVGSVGElement>(null)
   const graphGroupRef = useRef<SVGGElement>(null)
@@ -79,6 +139,7 @@ export default function Graph2D({ width, height }: Props) {
 
   // ── Simulation tick — direct DOM mutation, no React state ──────────────────
   const handleTick = useCallback((simNodes: SimNode[], simLinks: SimLink[]) => {
+    lastSimNodesRef.current = simNodes
     for (const node of simNodes) {
       const el = nodeEls.current.get(node.id)
       if (el) {
@@ -117,7 +178,12 @@ export default function Graph2D({ width, height }: Props) {
       el.setAttribute('x2', String(tgt.x ?? 0))
       el.setAttribute('y2', String(tgt.y ?? 0))
     })
-  }, [])  // stable — reads selectedNodeId via ref, no deps needed
+    // Throttle label culling — every 8 ticks to avoid per-frame O(n²) cost
+    cullTickCountRef.current++
+    if (cullTickCountRef.current % 8 === 0) {
+      cullSVGLabels(simNodes)
+    }
+  }, [cullSVGLabels])  // stable — reads everything else via refs
 
   // ── Fit all nodes into viewport ───────────────────────────────────────────
   const fitView = useCallback((simNodes: SimNode[]) => {
@@ -204,7 +270,8 @@ export default function Graph2D({ width, height }: Props) {
       const v = viewRef.current
       graphGroupRef.current.setAttribute('transform', `translate(${v.x},${v.y}) scale(${v.scale})`)
     }
-  }, [])
+    cullSVGLabels(lastSimNodesRef.current)
+  }, [cullSVGLabels])
 
   // Register non-passive wheel listener (React synthetic events are passive by default)
   useEffect(() => {
