@@ -80,7 +80,7 @@ export interface ImplicitLink {
 
 // Serialized form stored in IndexedDB (Maps → plain arrays for JSON compatibility)
 export interface SerializedTfIdf {
-  schemaVersion: 2
+  schemaVersion: 3
   fingerprint: string
   idf: [string, number][]
   docs: { docId: string; filename: string; speaker: string; vector: [string, number][]; norm: number }[]
@@ -99,7 +99,7 @@ export class TfIdfIndex {
   /** Serialize index state to a plain object suitable for IndexedDB storage. */
   serialize(fingerprint: string): SerializedTfIdf {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       fingerprint,
       idf: [...this.idf.entries()],
       docs: this.docs.map(d => ({

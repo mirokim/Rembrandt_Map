@@ -75,7 +75,7 @@ export async function loadTfIdfCache(
     db.close()
     if (!raw || typeof raw !== 'object') return null
     const cached = raw as SerializedTfIdf
-    if (cached.schemaVersion !== 2) return null
+    if (cached.schemaVersion !== 3) return null
     if (cached.fingerprint !== fingerprint) return null
     return cached
   } catch (err) {
