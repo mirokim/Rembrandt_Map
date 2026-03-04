@@ -125,11 +125,26 @@ async function fixFileWithClaude(
   } catch { return null }
 }
 
+// 프론트매터 이후 본문 길이 계산 (--- 구분자 기준)
+function getBodyLength(content: string): number {
+  const secondDash = content.indexOf('\n---', content.indexOf('---') + 3)
+  return secondDash > 0 ? content.slice(secondDash + 4).trim().length : content.length
+}
+
 async function reviewFileWithClaude(
   page: VaultPage,
   manualCtx: string,
   apiKey: string,
 ): Promise<FileIssue> {
+  // 본문 600자 미만 (총 파일 ~1KB) → 스텁으로 간주, Claude 없이 즉시 아카이브 권장
+  if (getBodyLength(page.content) < 600) {
+    return {
+      filename: page.filename,
+      issues: '🗄 아카이브 권장: 본문 내용 1KB 미만 — 스텁/빈 페이지로 간주 (Claude 검수 생략)',
+      archive: true,
+    }
+  }
+
   const sysPrompt = manualCtx
     ? `당신은 Graph RAG 데이터 품질 검수자입니다.\n아래는 정제 매뉴얼입니다:\n\n${manualCtx}\n\n${ARCHIVE_CRITERIA}\n\n위 매뉴얼 기준으로 마크다운 문서를 검수하고, 문제점만 간략히 한국어로 나열하세요. 문제 없으면 "✅ 이상 없음" 출력.`
     : `당신은 Graph RAG 데이터 품질 검수자입니다.\n${ARCHIVE_CRITERIA}\n\n마크다운 문서의 구조적 문제(Frontmatter 누락, 헤딩 없음, 빈 섹션 등)를 찾아 간략히 나열하세요. 문제 없으면 "✅ 이상 없음" 출력.`
@@ -203,6 +218,7 @@ interface ConvertedFile {
   title: string
   type: string
   date: string
+  sizeKb: number
 }
 
 type ImportStatus =
@@ -332,7 +348,8 @@ export default function ConfluenceTab() {
         const fmType  = p.content.match(/^type:\s*(.+)$/m)?.[1]?.trim() ?? ''
         const fmDate  = p.content.match(/^date:\s*(.+)$/m)?.[1]?.trim() ?? ''
         const fmTitle = p.content.match(/^title:\s*(.+)$/m)?.[1]?.trim() ?? p.stem
-        return { filename: p.filename, title: fmTitle, type: fmType, date: fmDate }
+        const sizeKb  = Math.round(new TextEncoder().encode(p.content).length / 102.4) / 10
+        return { filename: p.filename, title: fmTitle, type: fmType, date: fmDate, sizeKb }
       }))
 
       // ── 3. Download image attachments ────────────────────────────────────────
@@ -898,7 +915,7 @@ export default function ConfluenceTab() {
                 <div
                   className="grid px-3 py-1.5 text-[10px] font-semibold sticky top-0"
                   style={{
-                    gridTemplateColumns: '1fr 80px 90px',
+                    gridTemplateColumns: '1fr 60px 90px 46px',
                     color: 'var(--color-text-muted)',
                     background: 'var(--color-bg-surface)',
                     borderBottom: '1px solid var(--color-border)',
@@ -907,15 +924,17 @@ export default function ConfluenceTab() {
                   <span>파일명</span>
                   <span>유형</span>
                   <span>날짜</span>
+                  <span>크기</span>
                 </div>
                 {convertedFiles.map((f, i) => (
                   <div
                     key={i}
                     className="grid px-3 py-1.5 text-[11px]"
                     style={{
-                      gridTemplateColumns: '1fr 80px 90px',
+                      gridTemplateColumns: '1fr 60px 90px 46px',
                       borderBottom: i < convertedFiles.length - 1 ? '1px solid var(--color-border)' : undefined,
                       color: 'var(--color-text-secondary)',
+                      background: f.sizeKb < 1 ? '#f8717108' : undefined,
                     }}
                   >
                     <span className="truncate font-mono" style={{ fontSize: 10 }} title={f.filename}>
@@ -923,6 +942,9 @@ export default function ConfluenceTab() {
                     </span>
                     <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>{f.type || '—'}</span>
                     <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>{f.date || '—'}</span>
+                    <span style={{ color: f.sizeKb < 1 ? '#f87171' : 'var(--color-text-muted)', fontSize: 10 }}>
+                      {f.sizeKb}K
+                    </span>
                   </div>
                 ))}
               </div>
