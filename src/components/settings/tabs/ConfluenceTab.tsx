@@ -75,6 +75,14 @@ const HARD_MIN_DATE = '2025-01-01'
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 const PYTHON_SCRIPTS = ['audit_and_fix.py', 'enhance_wikilinks.py', 'gen_index.py']
 
+function getDateStamp(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}${m}${day}`
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function loadManualContext(): Promise<string> {
@@ -231,11 +239,14 @@ export default function ConfluenceTab() {
   const [savedDirs, setSavedDirs] = useState<string[]>([])
   const [rollbackStatus, setRollbackStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const cancelledRef = useRef(false)
-  const activeDirRef = useRef('')  // set after save step for auto-fix
+  const activeDirRef = useRef('')   // set after save step; e.g. vault/active_20260304
+  const archiveDirRef = useRef('')  // e.g. vault/archive_20260304
 
   const [autoFixStatus, setAutoFixStatus] = useState<'idle' | 'running' | 'done'>('idle')
   const [fixProgress, setFixProgress] = useState({ done: 0, total: 0 })
   const [fixedFiles, setFixedFiles] = useState<{ filename: string; ok: boolean }[]>([])
+  const [archiveMoveStatus, setArchiveMoveStatus] = useState<'idle' | 'running' | 'done'>('idle')
+  const [movedToArchive, setMovedToArchive] = useState(0)
 
   const addLog = (msg: string) => setLog(prev => [...prev, msg])
 
@@ -267,8 +278,14 @@ export default function ConfluenceTab() {
     setRollbackStatus('idle')
     setPageCount(0)
     setReviewProgress({ done: 0, total: 0 })
+    setAutoFixStatus('idle')
+    setFixedFiles([])
+    setArchiveMoveStatus('idle')
+    setMovedToArchive(0)
 
-    const targetFolder = cfg.targetFolder || 'confluence'
+    const stamp = getDateStamp()
+    const targetFolder = `active_${stamp}`  // e.g. active_20260304
+    archiveDirRef.current = vaultPath + `/archive_${stamp}`
 
     try {
       // ── 1. Fetch pages ───────────────────────────────────────────────────────
@@ -344,7 +361,7 @@ export default function ConfluenceTab() {
 
       // ── 4. Save MD files ─────────────────────────────────────────────────────
       setStatus('saving')
-      addLog(`💾 볼트에 저장: ${vaultPath}/${targetFolder}/ + attachments/`)
+      addLog(`💾 볼트에 저장: ${vaultPath}/${targetFolder}/  (아카이브→ archive_${stamp})`)
       const saveResult = await confluenceAPI.savePages(
         vaultPath!,
         targetFolder,
@@ -460,6 +477,26 @@ export default function ConfluenceTab() {
     }
     setFixedFiles(results)
     setAutoFixStatus('done')
+  }
+
+  const handleMoveToArchive = async () => {
+    const archiveReviews = reviews.filter(r => r.archive)
+    if (archiveReviews.length === 0 || !activeDirRef.current || !archiveDirRef.current) return
+
+    setArchiveMoveStatus('running')
+    const vaultAPI = (window as any).vaultAPI as {
+      moveFile: (absolutePath: string, destFolderPath: string) => Promise<{ success: boolean; newPath: string }>
+    }
+    let moved = 0
+    for (const r of archiveReviews) {
+      try {
+        const src = activeDirRef.current + '/' + r.filename
+        await vaultAPI.moveFile(src, archiveDirRef.current)
+        moved++
+      } catch { /* 이동 실패는 건너뜀 */ }
+    }
+    setMovedToArchive(moved)
+    setArchiveMoveStatus('done')
   }
 
   const handleRollback = async () => {
@@ -667,19 +704,32 @@ export default function ConfluenceTab() {
 
       {/* Save settings */}
       <section>
-        <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+        <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
           저장 설정
         </h3>
-        <FieldRow
-          label="저장 폴더"
-          value={cfg.targetFolder}
-          onChange={v => setConfluenceConfig({ targetFolder: v })}
-          placeholder="confluence"
-        />
-        <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-muted)' }}>
-          볼트 내 서브폴더 (없으면 자동 생성)
-          {vaultPath && <span> — {vaultPath}/{cfg.targetFolder || 'confluence'}</span>}
-        </p>
+        {/* Auto folder info */}
+        <div className="rounded p-2.5 text-[11px]" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: 'var(--color-text-muted)' }}>일반 문서 →</span>
+              <code className="font-mono" style={{ color: 'var(--color-accent)' }}>active_YYYYMMDD/</code>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: 'var(--color-text-muted)' }}>아카이브 →</span>
+              <code className="font-mono" style={{ color: '#60a5fa' }}>archive_YYYYMMDD/</code>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: 'var(--color-text-muted)' }}>이미지 →</span>
+              <code className="font-mono" style={{ color: 'var(--color-text-muted)' }}>attachments/</code>
+              <span style={{ color: 'var(--color-text-muted)' }}>(볼트 루트)</span>
+            </div>
+          </div>
+          {vaultPath && (
+            <p className="mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              볼트: {vaultPath}
+            </p>
+          )}
+        </div>
 
         {/* Skip images toggle */}
         <div className="flex items-center gap-2 mt-3">
@@ -881,31 +931,46 @@ export default function ConfluenceTab() {
             {/* Review tab */}
             {resultTab === 'review' && (
               <div style={{ border: '1px solid var(--color-border)', borderTop: 'none', borderRadius: '0 0 4px 4px' }}>
-                {/* Auto-fix toolbar — shown when there are fixable problems */}
+                {/* Action toolbar — auto-fix + archive move */}
                 {(() => {
                   const fixable = reviews.filter(r => !r.issues.startsWith('✅') && !r.archive)
-                  if (fixable.length === 0 || !hasAnthropicKey || !activeDirRef.current) return null
+                  const archivable = reviews.filter(r => r.archive)
+                  if (fixable.length === 0 && archivable.length === 0) return null
                   const fixedOk = fixedFiles.filter(f => f.ok).length
+                  const anyRunning = autoFixStatus === 'running' || archiveMoveStatus === 'running' || isRunning
                   return (
                     <div
-                      className="flex items-center gap-3 px-3 py-2"
+                      className="flex items-center gap-2 px-3 py-2 flex-wrap"
                       style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-base)' }}
                     >
-                      <button
-                        onClick={handleAutoFix}
-                        disabled={autoFixStatus === 'running' || isRunning}
-                        className="text-[11px] px-3 py-1 rounded font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                        style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', whiteSpace: 'nowrap' }}
-                      >
-                        {autoFixStatus === 'running'
-                          ? `🔧 수정 중… (${fixProgress.done}/${fixProgress.total})`
-                          : autoFixStatus === 'done'
-                            ? `✅ 수정 완료 (${fixedOk}/${fixedFiles.length}개 성공)`
-                            : `🔧 자동 수정 (${fixable.length}개 파일)`}
-                      </button>
-                      <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                        Claude Haiku가 검수 결과를 바탕으로 파일을 직접 수정합니다
-                      </span>
+                      {fixable.length > 0 && hasAnthropicKey && activeDirRef.current && (
+                        <button
+                          onClick={handleAutoFix}
+                          disabled={anyRunning}
+                          className="text-[11px] px-3 py-1 rounded font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', whiteSpace: 'nowrap' }}
+                        >
+                          {autoFixStatus === 'running'
+                            ? `🔧 수정 중… (${fixProgress.done}/${fixProgress.total})`
+                            : autoFixStatus === 'done'
+                              ? `✅ 수정 완료 (${fixedOk}/${fixedFiles.length}개)`
+                              : `🔧 자동 수정 (${fixable.length}개)`}
+                        </button>
+                      )}
+                      {archivable.length > 0 && activeDirRef.current && (
+                        <button
+                          onClick={handleMoveToArchive}
+                          disabled={anyRunning || archiveMoveStatus === 'done'}
+                          className="text-[11px] px-3 py-1 rounded font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{ background: '#3b82f622', color: '#60a5fa', border: '1px solid #3b82f644', whiteSpace: 'nowrap' }}
+                        >
+                          {archiveMoveStatus === 'running'
+                            ? '📦 이동 중…'
+                            : archiveMoveStatus === 'done'
+                              ? `✅ 아카이브 이동 완료 (${movedToArchive}개)`
+                              : `📦 archive_${getDateStamp()}/ 로 이동 (${archivable.length}개)`}
+                        </button>
+                      )}
                     </div>
                   )
                 })()}

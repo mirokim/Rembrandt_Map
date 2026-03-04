@@ -364,13 +364,15 @@ Obsidian 파일명에 [범주] 접두사 패턴(예: [기획] 파일명, [2025.0
 
 Graph RAG 쿼리 시 항상 포함되는 최상위 컨텍스트 문서. AI가 프로젝트의 현재 상태를 파악하는 출발점이다.
 
-## 14.2  _index.md (active/)
+## 14.2  index_YYYYMMDD.md (active_YYYYMMDD/ 루트)
 
-전체 active 파일을 날짜 역순으로 정렬한 인덱스 문서
+Confluence 가져오기 1회분에 해당하는 인덱스 문서. 파일명은 실행 날짜를 포함한다 (예: `index_20260304.md`).
+
+전체 active 파일을 날짜 역순으로 정렬한 인덱스 내용
 
 월별 그룹핑으로 시간 흐름 파악 용이
 
-문서 추가/삭제 시 gen_index.py로 자동 갱신
+문서 추가/삭제 시 gen_index.py로 자동 갱신 (출력 파일명도 날짜 스탬프 형식 유지)
 
 # 15.  Obsidian 설정
 
@@ -392,7 +394,7 @@ Frontmatter 필수 필드 작성: date, type, status, tags
 
 특수 태그(chief 등) 해당 여부 확인
 
-gen_index.py 실행 → _index.md 갱신
+gen_index.py 실행 → index_YYYYMMDD.md 갱신 (날짜 스탬프 파일명)
 
 ## 17.2  정기 정제 주기
 
