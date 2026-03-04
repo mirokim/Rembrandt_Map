@@ -209,42 +209,50 @@ export async function fetchRAGContext(
       return buildGlobalGraphContext(35, 4)
     }
 
-    let candidates: import('@/types').SearchResult[] = []
+    // ── Stage 1: 직접 문자열 검색 (우선 시도) ─────────────────────────────────
+    // 공백 분리 + 숫자 추출로 날짜형 파일명("[2026.01.28]") 매칭 보장
+    const directHits = directVaultSearch(userMessage, 8)
+    // 파일명 매칭(score 2x)이 있으면 "명시적 문서 지목" 쿼리로 판단 (raw score >= 2 → 정규화 0.2)
+    const hasStrongDirectHit = directHits.some(r => r.score >= 0.2)
 
-    if (typeof window !== 'undefined' && window.backendAPI) {
-      // ── Primary path: ChromaDB vector search via Python backend ──
-      try {
-        const response = await window.backendAPI.search(userMessage, 8)
-        candidates = response.results ?? []
-      } catch {
-        // Backend not running — fall through to frontend search
+    let seeds: import('@/types').SearchResult[]
+
+    if (hasStrongDirectHit) {
+      // 직접 검색 결과가 충분 → 이를 우선 시드로 사용
+      seeds = directHits
+      logger.debug(`[RAG] 직접 검색 우선: ${seeds.map(r => r.filename).join(', ')}`)
+    } else {
+      // 직접 매칭 미흡 → TF-IDF / ChromaDB 폴백
+      let candidates: import('@/types').SearchResult[] = []
+
+      if (typeof window !== 'undefined' && window.backendAPI) {
+        try {
+          const response = await window.backendAPI.search(userMessage, 8)
+          candidates = response.results ?? []
+        } catch { /* backend not running */ }
+      }
+      if (candidates.length === 0) {
+        candidates = frontendKeywordSearch(userMessage, 8, currentSpeaker)
+      }
+
+      logger.debug(`[RAG] TF-IDF 후보: ${candidates.length}개 (쿼리: "${userMessage.slice(0, 40)}")`)
+
+      const relevant = candidates.filter(r => r.score > 0.05)
+      seeds = relevant.length > 0 ? rerankResults(relevant, userMessage, 5, currentSpeaker) : []
+
+      // 직접 검색에서 TF-IDF가 놓친 문서 보완
+      const seedIds = new Set(seeds.map(r => r.doc_id))
+      for (const hit of directHits) {
+        if (!seedIds.has(hit.doc_id)) seeds.push(hit)
       }
     }
 
-    // 백엔드 결과가 없으면 프론트엔드 검색으로 보완
-    // (백엔드 미실행, 미인덱싱, 빈 결과 모두 포함)
-    if (candidates.length === 0) {
-      candidates = frontendKeywordSearch(userMessage, 8, currentSpeaker)
-    }
-
-    logger.debug(`[RAG] 검색 후보: ${candidates.length}개 (쿼리: "${userMessage.slice(0, 40)}")`)
-
-    // Stage 2: Filter by minimum similarity (완화된 임계값 0.05)
-    // 이전 0.15는 너무 엄격하여 제목이 조금만 달라도 누락됨
-    const relevant = candidates.filter((r) => r.score > 0.05)
-
-    // Stage 3: Rerank by keyword overlap + speaker affinity → top 5 (시작 노드 확보)
-    // candidates가 적어도 buildDeepGraphContext 내부에서 허브 노드로 보완됨
-    const reranked = relevant.length > 0
-      ? rerankResults(relevant, userMessage, 5, currentSpeaker)
-      : []
-
-    // _index.md 우선 포함 — 볼트 인덱스 파일이 있으면 항상 첫 번째 컨텍스트로 보장
+    // _index.md 항상 포함
     const { loadedDocuments: _vaultDocs } = useVaultStore.getState()
     const indexDoc = _vaultDocs?.find(d => d.filename.toLowerCase() === '_index.md')
-    if (indexDoc && !reranked.some(r => r.doc_id === indexDoc.id)) {
+    if (indexDoc && !seeds.some(r => r.doc_id === indexDoc.id)) {
       const firstSection = indexDoc.sections.find(s => s.body.trim())
-      reranked.unshift({
+      seeds.unshift({
         doc_id: indexDoc.id,
         filename: indexDoc.filename,
         section_id: firstSection?.id ?? '',
@@ -258,18 +266,9 @@ export async function fetchRAGContext(
       })
     }
 
-    // Stage 3b: 직접 문자열 검색 — vault 전체에서 쿼리 단어를 그렙 방식으로 검색
-    // TF-IDF/BFS가 날짜형·특수 파일명을 놓칠 때 보완
-    const _directHits = directVaultSearch(userMessage, 5)
-    const _existingIds = new Set(reranked.map(r => r.doc_id))
-    const _newHits = _directHits.filter(r => !_existingIds.has(r.doc_id))
-    if (_newHits.length > 0) {
-      logger.debug(`[RAG] 직접 검색 보완: ${_newHits.map(r => r.filename).join(', ')}`)
-      reranked.push(..._newHits.slice(0, 3))
-    }
+    const reranked = seeds
 
-    // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
-    // queryTerms 전달 → 패시지-레벨 검색으로 각 문서의 가장 관련된 섹션 선택
+    // Stage 2: BFS 그래프 탐색 — 시드에서 최대 3홉까지 연결 문서 수집
     if (reranked.length > 0) {
       useGraphStore.getState().setAiHighlightNodes(reranked.map(r => r.doc_id))
     }

@@ -269,10 +269,14 @@ export function directVaultSearch(
   if (!loadedDocuments?.length) return []
 
   // 쿼리를 공백 기준 분리 (2자 이상만)
-  const terms = query
+  const rawTerms = query
     .split(/\s+/)
     .map(t => t.toLowerCase())
     .filter(t => t.length >= 2)
+  // 한국어 날짜 표현에서 숫자 추출: "28일" → "28", "26년" → "26"
+  // ISO 파일명 "[2026.01.28]"의 숫자 컴포넌트와 매칭되도록 보완
+  const numericTerms = query.match(/\d{2,}/g) ?? []
+  const terms = [...new Set([...rawTerms, ...numericTerms])]
   if (terms.length === 0) return []
 
   const scored: { doc: LoadedDocument; score: number; bestSection: DocSection | null }[] = []
