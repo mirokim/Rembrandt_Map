@@ -120,6 +120,25 @@ interface SettingsState {
   multiAgentRAG: boolean
   /** Global RAG document-reference instructions (injected into every persona's system prompt) */
   ragInstruction: string
+  /** Confluence import configuration */
+  confluenceConfig: {
+    baseUrl: string
+    /** 인증 방식:
+     *  cloud       — Atlassian Cloud: Basic auth (이메일 + API 토큰)
+     *  server_pat  — Server/Data Center: Bearer PAT (토큰만, 이메일 불필요)
+     *  server_basic — Server/Data Center: Basic auth (사용자명 + 비밀번호) */
+    authType: 'cloud' | 'server_pat' | 'server_basic'
+    email: string      // cloud/server_basic: 이메일 or 사용자명
+    apiToken: string   // cloud/server_basic: API토큰 or 비밀번호; server_pat: PAT
+    spaceKey: string
+    targetFolder: string
+    /** 가져올 페이지의 최소 생성일 (YYYY-MM-DD). 기본: 2025-01-01 */
+    dateFrom: string
+    /** 가져올 페이지의 최대 생성일 (YYYY-MM-DD). 비어있으면 제한 없음 */
+    dateTo: string
+    /** 자체 서명 인증서 또는 사내 CA 인증서 허용 (사내망 Confluence) */
+    bypassSSL: boolean
+  }
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -151,6 +170,7 @@ interface SettingsState {
   setReportModelId: (id: string) => void
   setMultiAgentRAG: (enabled: boolean) => void
   setRagInstruction: (v: string) => void
+  setConfluenceConfig: (c: Partial<{ baseUrl: string; authType: 'cloud' | 'server_pat' | 'server_basic'; email: string; apiToken: string; spaceKey: string; targetFolder: string; dateFrom: string; dateTo: string; bypassSSL: boolean }>) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -203,6 +223,7 @@ export const useSettingsStore = create<SettingsState>()(
       reportModelId: 'claude-sonnet-4-6',
       multiAgentRAG: true,
       ragInstruction: DEFAULT_RAG_INSTRUCTION,
+      confluenceConfig: { baseUrl: '', authType: 'cloud' as const, email: '', apiToken: '', spaceKey: '', targetFolder: 'active', dateFrom: '2026-01-01', dateTo: '', bypassSSL: false },
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -316,6 +337,7 @@ export const useSettingsStore = create<SettingsState>()(
       setReportModelId: (reportModelId) => set({ reportModelId }),
       setMultiAgentRAG: (multiAgentRAG) => set({ multiAgentRAG }),
       setRagInstruction: (ragInstruction) => set({ ragInstruction }),
+      setConfluenceConfig: (c) => set(s => ({ confluenceConfig: { ...s.confluenceConfig, ...c } })),
     }),
     {
       name: 'rembrandt-settings',
@@ -339,6 +361,7 @@ export const useSettingsStore = create<SettingsState>()(
         reportModelId: state.reportModelId,
         multiAgentRAG: state.multiAgentRAG,
         ragInstruction: state.ragInstruction,
+        confluenceConfig: state.confluenceConfig,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {
@@ -349,6 +372,8 @@ export const useSettingsStore = create<SettingsState>()(
           personaModels: migratePersonaModels(
             stored.personaModels ?? { ...DEFAULT_PERSONA_MODELS }
           ),
+          // Merge with defaults so new fields added to confluenceConfig don't go missing
+          confluenceConfig: { ...current.confluenceConfig, ...(stored.confluenceConfig ?? {}) },
         }
       },
     }

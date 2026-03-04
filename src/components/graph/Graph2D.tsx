@@ -72,7 +72,7 @@ export default function Graph2D({ width, height }: Props) {
   const cullSVGLabels = useCallback((simNodes: SimNode[]) => {
     if (!showNodeLabelsRef.current) return
     const { scale, x: tx, y: ty } = viewRef.current
-    const MIN_GAP = 48
+    const MIN_GAP = 64
     const labelMap = labelEls.current
     const dMap = degreeMapRef.current
     const maxDeg = maxDegreeRef.current
@@ -85,7 +85,7 @@ export default function Graph2D({ width, height }: Props) {
     })
 
     const shown: Array<{ sx: number; sy: number }> = []
-    const fontSize = `${11 / scale}px`
+    const fontSize = `${9 / scale}px`
 
     for (const node of sorted) {
       const lEl = labelMap.get(node.id)
@@ -94,7 +94,7 @@ export default function Graph2D({ width, height }: Props) {
       const deg = dMap.get(node.id) ?? 0
 
       if (!isSelected && scale < 0.4 && deg < maxDeg * 0.15) {
-        lEl.style.opacity = '0'
+        lEl.setAttribute('opacity', '0')
         continue
       }
 
@@ -104,10 +104,10 @@ export default function Graph2D({ width, height }: Props) {
         p => Math.abs(p.sx - sx) < MIN_GAP && Math.abs(p.sy - sy) < MIN_GAP
       )
       if (tooClose) {
-        lEl.style.opacity = '0'
+        lEl.setAttribute('opacity', '0')
       } else {
         shown.push({ sx, sy })
-        lEl.style.opacity = isSelected ? '0.95' : '0.7'
+        lEl.setAttribute('opacity', isSelected ? '0.95' : '0.7')
         lEl.style.fontSize = fontSize
       }
     }
@@ -209,7 +209,9 @@ export default function Graph2D({ width, height }: Props) {
       `translate(${viewRef.current.x},${viewRef.current.y}) scale(${viewRef.current.scale})`
     )
     setGraphLayoutReady(true)
-  }, [width, height, setGraphLayoutReady])
+    // Apply label culling now that final scale is known
+    cullSVGLabels(simNodes)
+  }, [width, height, setGraphLayoutReady, cullSVGLabels])
 
   const { simRef, simNodesRef } = useGraphSimulation({ width, height, onTick: handleTick, onComplete: fitView })
 
@@ -478,7 +480,7 @@ export default function Graph2D({ width, height }: Props) {
         const el = nodeMap.get(nodeId)
         if (el) { el.removeAttribute('data-hl'); el.style.filter = '' }
         const lEl = labelMap.get(nodeId)
-        if (lEl) { lEl.removeAttribute('data-hl'); lEl.style.opacity = '' }
+        if (lEl) { lEl.removeAttribute('data-hl'); lEl.removeAttribute('opacity') }
       })
       prevHighlightedLinkIdxs.current.forEach(i => {
         const el = linkMap.get(i)
@@ -511,7 +513,7 @@ export default function Graph2D({ width, height }: Props) {
         const el = nodeMap.get(nodeId)
         if (el) { el.removeAttribute('data-hl'); el.style.filter = '' }
         const lEl = labelMap.get(nodeId)
-        if (lEl) { lEl.removeAttribute('data-hl'); lEl.style.opacity = '' }
+        if (lEl) { lEl.removeAttribute('data-hl'); lEl.removeAttribute('opacity') }
       }
     })
     prevHighlightedLinkIdxs.current.forEach(i => {
@@ -530,8 +532,12 @@ export default function Graph2D({ width, height }: Props) {
       el.style.filter = nodeId === hoveredNodeId
         ? `drop-shadow(0 0 10px ${accentColor}) drop-shadow(0 0 4px ${accentColor})`
         : nd ? `drop-shadow(0 0 5px ${SPEAKER_CONFIG[nd.speaker].color}99)` : ''
+      // Only reveal the label for the directly hovered node, not its neighbors
       const lEl = labelMap.get(nodeId)
-      if (lEl) { lEl.setAttribute('data-hl', '1'); lEl.style.opacity = '1' }
+      if (lEl) {
+        lEl.setAttribute('data-hl', '1')
+        if (nodeId === hoveredNodeId) lEl.setAttribute('opacity', '1')
+      }
     })
     // O(k): set data-hl + accent on highlighted links
     neighborLinkIdxs.forEach(i => {
@@ -541,7 +547,7 @@ export default function Graph2D({ width, height }: Props) {
 
     prevHighlightedNodeIds.current = neighborIds
     prevHighlightedLinkIdxs.current = neighborLinkIdxs
-  }, [hoveredNodeId, links, showNodeLabels])
+  }, [hoveredNodeId, links])
 
   return (
     <div style={{ position: 'relative', width, height }} data-testid="graph-2d">
@@ -549,7 +555,7 @@ export default function Graph2D({ width, height }: Props) {
         ref={svgRef}
         width={width}
         height={height}
-        style={{ display: 'block', cursor: 'grab' }}
+        style={{ display: 'block', cursor: 'grab', overflow: 'visible' }}
         onMouseDown={handleSVGMouseDown}
         onMouseMove={handleSVGMouseMove}
         onMouseUp={handleSVGMouseUp}
@@ -571,6 +577,7 @@ export default function Graph2D({ width, height }: Props) {
                   stroke="var(--color-border)"
                   strokeWidth={1}
                   strokeOpacity={physics.linkOpacity}
+                  vectorEffect="non-scaling-stroke"
                 />
               )
             })}
@@ -659,7 +666,7 @@ export default function Graph2D({ width, height }: Props) {
                 x={width / 2}
                 y={height / 2 + LABEL_Y_OFFSET}
                 textAnchor="middle"
-                fontSize={11}
+                fontSize={9}
                 fontWeight="normal"
                 fill="var(--color-text-secondary)"
                 stroke="var(--color-bg-primary)"

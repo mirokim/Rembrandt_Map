@@ -118,7 +118,7 @@ export default function ReportViewer() {
       {/* 보고서 본문 */}
       <div
         className="flex-1 overflow-y-auto px-6 py-5"
-        style={{ color: 'var(--color-text-primary)' }}
+        style={{ color: 'var(--color-text-primary)', wordBreak: 'keep-all', overflowWrap: 'break-word' }}
       >
         {!markdown && isStreaming ? (
           <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>

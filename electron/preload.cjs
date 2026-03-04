@@ -65,6 +65,32 @@ contextBridge.exposeInMainWorld('vaultAPI', {
   },
 })
 
+// ── confluenceAPI ─────────────────────────────────────────────────────────────
+contextBridge.exposeInMainWorld('confluenceAPI', {
+  /** Fetch all pages from a Confluence space. Returns raw page objects. */
+  fetchPages: (config) => ipcRenderer.invoke('confluence:fetch-pages', config),
+
+  /** Save converted markdown files to the vault. */
+  savePages: (vaultPath, targetFolder, pagesWithMd) =>
+    ipcRenderer.invoke('confluence:save-pages', vaultPath, targetFolder, pagesWithMd),
+
+  /** Download image attachments for a single page. */
+  downloadAttachments: (config, vaultPath, targetFolder, pageId) =>
+    ipcRenderer.invoke('confluence:download-attachments', config, vaultPath, targetFolder, pageId),
+
+  /** Run a Python script from manual/scripts/. Returns { stdout, stderr, exitCode }. */
+  runScript: (scriptName, args) =>
+    ipcRenderer.invoke('tools:run-script', scriptName, args),
+
+  /** Delete saved files and remove empty dirs. Returns { deleted, errors }. */
+  rollback: (files, dirs) =>
+    ipcRenderer.invoke('confluence:rollback', files, dirs),
+
+  /** Read a file from the app directory (e.g. 'manual/foo.md'). Returns text or null. */
+  readAppFile: (relativePath) =>
+    ipcRenderer.invoke('tools:read-app-file', relativePath),
+})
+
 // ── backendAPI (Phase 1-3) ────────────────────────────────────────────────────
 const BACKEND_BASE = 'http://127.0.0.1:8765'
 

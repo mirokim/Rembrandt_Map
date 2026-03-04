@@ -12,7 +12,7 @@ import {
   X, BarChart2, Trash2,
   Settings, Cpu, GitMerge, Keyboard, Info,
   Layers,
-  Users, Tag,
+  Users, Tag, Download,
 } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import GeneralTab from './tabs/GeneralTab'
@@ -25,12 +25,14 @@ import TagsTab from './tabs/TagsTab'
 import StatsTab from './tabs/StatsTab'
 import TrashTab from './tabs/TrashTab'
 import ShortcutsTab from './tabs/ShortcutsTab'
+import ConfluenceTab from './tabs/ConfluenceTab'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SettingsTab =
   | 'stats' | 'trash'
   | 'general' | 'ai' | 'personas' | 'debate' | 'shortcuts' | 'project' | 'tags'
+  | 'confluence'
   | 'about'
 
 type NavItem = { id: SettingsTab; icon: React.ElementType; label: string }
@@ -42,8 +44,9 @@ const NAV: NavGroup[] = [
   {
     label: '도구',
     items: [
-      { id: 'stats', icon: BarChart2, label: '통계' },
-      { id: 'trash', icon: Trash2,    label: '휴지통' },
+      { id: 'stats',      icon: BarChart2, label: '통계' },
+      { id: 'trash',      icon: Trash2,    label: '휴지통' },
+      { id: 'confluence', icon: Download,  label: 'Confluence 가져오기' },
     ],
   },
   {
@@ -91,8 +94,9 @@ function renderTabContent(tab: SettingsTab) {
     case 'project':   return <ProjectTab />
     case 'debate':    return <DebateTab />
     case 'tags':      return <TagsTab />
-    case 'shortcuts': return <ShortcutsTab />
-    case 'about':     return <AboutTab />
+    case 'shortcuts':  return <ShortcutsTab />
+    case 'confluence': return <ConfluenceTab />
+    case 'about':      return <AboutTab />
     default:          return <PlaceholderContent label={ALL_ITEMS.find(i => i.id === tab)?.label ?? tab} />
   }
 }

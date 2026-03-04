@@ -493,6 +493,311 @@ function registerWindowIpcHandlers() {
   })
 }
 
+// ── App asset reader (safe: confined to app directory) ─────────────────────────
+
+ipcMain.handle('tools:read-app-file', (_event, relativePath) => {
+  if (!relativePath || typeof relativePath !== 'string') return null
+  // Reject absolute paths and traversal sequences
+  if (path.isAbsolute(relativePath) || relativePath.includes('..')) return null
+  const appRoot = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..')
+  const filePath = path.resolve(path.join(appRoot, relativePath))
+  if (!filePath.startsWith(path.resolve(appRoot))) return null
+  if (!fs.existsSync(filePath)) return null
+  return fs.readFileSync(filePath, 'utf-8')
+})
+
+// ── Confluence IPC handlers ────────────────────────────────────────────────────
+
+function registerConfluenceIpcHandlers() {
+  /**
+   * Fetch all pages from a Confluence space via REST API v1.
+   * Uses Electron's net.fetch to bypass CORS.
+   * Returns raw page objects: { id, title, body.storage.value, metadata.labels, version, history }
+   */
+  /**
+   * Returns the REST API base path for a Confluence instance.
+   * Atlassian Cloud uses /wiki/rest/api; Server/Data Center uses /rest/api.
+   */
+  function getRestApiBase(baseUrl) {
+    try {
+      const host = new URL(baseUrl).hostname
+      return host.endsWith('atlassian.net') ? `${baseUrl}/wiki/rest/api` : `${baseUrl}/rest/api`
+    } catch {
+      return `${baseUrl}/rest/api`
+    }
+  }
+
+  /**
+   * Build Authorization header based on auth type.
+   * cloud / server_basic → Basic base64(email:token)
+   * server_pat           → Bearer <token>
+   */
+  function buildConfluenceAuthHeaders(authType, email, apiToken) {
+    let authHeader
+    if (authType === 'server_pat') {
+      authHeader = `Bearer ${apiToken}`
+    } else {
+      authHeader = `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}`
+    }
+    return { Authorization: authHeader, Accept: 'application/json' }
+  }
+
+  /**
+   * Apply SSL bypass for the duration of a callback (corporate self-signed certs).
+   * Restores the original verify proc afterward.
+   */
+  async function withSSLBypass(bypass, fn) {
+    if (!bypass) return fn()
+    const { session } = require('electron')
+    session.defaultSession.setCertificateVerifyProc((_req, cb) => cb(0))
+    try {
+      return await fn()
+    } finally {
+      session.defaultSession.setCertificateVerifyProc(null)  // restore default
+    }
+  }
+
+  ipcMain.handle('confluence:fetch-pages', async (_event, config) => {
+    const { baseUrl, authType = 'cloud', email, apiToken, spaceKey, dateFrom, dateTo, bypassSSL = false } = config
+
+    // Validate required fields (server_pat doesn't need email)
+    if (!baseUrl || !apiToken || !spaceKey) {
+      throw new Error('baseUrl, apiToken, spaceKey 는 필수 항목입니다.')
+    }
+    if (authType !== 'server_pat' && !email) {
+      throw new Error('Cloud / Server Basic 인증은 이메일(사용자명)이 필요합니다.')
+    }
+
+    // Date range validation — hard lower bound: 2025-01-01
+    const HARD_MIN = '2025-01-01'
+    const effectiveDateFrom = (!dateFrom || dateFrom < HARD_MIN) ? HARD_MIN : dateFrom
+    if (dateFrom && dateFrom < HARD_MIN) {
+      console.warn(`[Confluence] dateFrom(${dateFrom}) < 최소 허용값(${HARD_MIN}), ${HARD_MIN}로 보정합니다.`)
+    }
+
+    const base = baseUrl.replace(/\/+$/, '')
+    const headers = buildConfluenceAuthHeaders(authType, email, apiToken)
+    const restBase = getRestApiBase(base)
+
+    // Build CQL query for server-side date filtering (much more reliable than client-side)
+    // lastModified covers both created and modified dates on all Confluence versions
+    let cql = `space = "${spaceKey}" AND type = page AND lastModified >= "${effectiveDateFrom}"`
+    if (dateTo) cql += ` AND lastModified <= "${dateTo}"`
+    cql += ` ORDER BY lastModified DESC`
+
+    const pages = []
+    let start = 0
+    const limit = 50
+
+    while (true) {
+      const url =
+        `${restBase}/content/search` +
+        `?cql=${encodeURIComponent(cql)}` +
+        `&expand=body.storage,metadata.labels,version,history` +
+        `&limit=${limit}` +
+        `&start=${start}`
+
+      let res
+      try {
+        res = await withSSLBypass(bypassSSL, () => net.fetch(url, { headers }))
+      } catch (fetchErr) {
+        const msg = fetchErr?.message ?? String(fetchErr)
+        if (msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND') || msg.includes('ETIMEDOUT')) {
+          throw new Error(`서버에 연결할 수 없습니다. VPN 연결 상태 및 Base URL을 확인하세요.\n(${msg})`)
+        }
+        if (msg.includes('certificate') || msg.includes('CERT') || msg.includes('SSL')) {
+          throw new Error(`SSL 인증서 오류입니다. 사내 CA 인증서 사용 시 "SSL 인증서 우회" 옵션을 활성화하세요.\n(${msg})`)
+        }
+        throw fetchErr
+      }
+      if (!res.ok) {
+        const errText = await res.text().catch(() => String(res.status))
+        if (res.status === 401) {
+          const hint = authType === 'server_pat'
+            ? 'PAT 토큰이 올바른지 확인하세요.'
+            : 'API 토큰 또는 이메일/사용자명을 확인하세요.'
+          throw new Error(`인증 실패 (401). ${hint}`)
+        }
+        if (res.status === 403) throw new Error(`접근 거부 (403). 해당 스페이스에 대한 읽기 권한이 없습니다.`)
+        if (res.status === 404) throw new Error(`스페이스 또는 검색 API를 찾을 수 없습니다 (404). Space Key와 Base URL을 확인하세요.`)
+        throw new Error(`Confluence API ${res.status}: ${errText.slice(0, 300)}`)
+      }
+      const data = await res.json()
+
+      for (const page of (data.results ?? [])) {
+        pages.push(page)
+      }
+
+      // CQL search returns totalSize; stop when we have all results
+      const totalSize = data.totalSize ?? data.size ?? 0
+      if (pages.length >= totalSize || (data.results ?? []).length < limit) break
+      start += limit
+    }
+
+    return pages
+  })
+
+  /**
+   * Write converted markdown files into the vault.
+   * pagesWithMd: Array<{ filename: string; content: string }>
+   */
+  ipcMain.handle('confluence:save-pages', async (_event, vaultPath, targetFolder, pagesWithMd) => {
+    if (!vaultPath || typeof vaultPath !== 'string') throw new Error('Invalid vault path')
+    const resolvedVault = path.resolve(vaultPath)
+
+    // Validate targetFolder — block absolute paths and traversal, allow nested relative paths
+    if (!targetFolder || typeof targetFolder !== 'string') throw new Error('Invalid target folder')
+    if (path.isAbsolute(targetFolder) || targetFolder.includes('..')) throw new Error('Invalid target folder')
+    const targetDir = path.resolve(path.join(resolvedVault, targetFolder))
+    if (!isInsideVault(resolvedVault, targetDir)) throw new Error('Target folder is outside vault')
+
+    fs.mkdirSync(targetDir, { recursive: true })
+    let saved = 0
+    const savedFiles = []
+    for (const { filename, content } of pagesWithMd) {
+      if (!filename || typeof content !== 'string') continue
+      // Sanitize to plain basename — no path traversal
+      const safeFilename = path.basename(filename)
+      const filePath = path.join(targetDir, safeFilename)
+      if (!isInsideVault(resolvedVault, filePath)) continue
+      fs.writeFileSync(filePath, content, 'utf-8')
+      savedFiles.push(filePath)
+      saved++
+    }
+    // targetDir IS the active dir (per manual: vault/active/ = targetFolder)
+    return { saved, targetDir, activeDir: targetDir, files: savedFiles }
+  })
+
+  /**
+   * Rollback: delete the given file paths and remove empty directories.
+   * Returns { deleted, errors } — errors are non-fatal (file locked / already gone).
+   */
+  ipcMain.handle('confluence:rollback', async (_event, files, dirs) => {
+    if (!currentVaultPath) throw new Error('볼트가 열려있지 않습니다')
+    const resolvedVault = path.resolve(currentVaultPath)
+    let deleted = 0
+    const errors = []
+
+    for (const f of (files ?? [])) {
+      const resolved = path.resolve(f)
+      if (!isInsideVault(resolvedVault, resolved)) {
+        errors.push(`보안: 볼트 외부 경로 거부됨 — ${path.basename(f)}`)
+        continue
+      }
+      try {
+        if (fs.existsSync(resolved)) { fs.unlinkSync(resolved); deleted++ }
+      } catch (e) {
+        errors.push(`${path.basename(f)}: ${e.message}`)
+      }
+    }
+
+    // Remove directories only if now empty
+    for (const d of (dirs ?? [])) {
+      const resolved = path.resolve(d)
+      if (!isInsideVault(resolvedVault, resolved)) {
+        errors.push(`보안: 볼트 외부 폴더 거부됨 — ${path.basename(d)}`)
+        continue
+      }
+      try {
+        if (fs.existsSync(resolved)) {
+          const remaining = fs.readdirSync(resolved)
+          if (remaining.length === 0) fs.rmdirSync(resolved)
+          else errors.push(`폴더 비어있지 않음 (${remaining.length}개): ${path.basename(d)}`)
+        }
+      } catch (e) {
+        errors.push(`폴더 삭제 실패 (${path.basename(d)}): ${e.message}`)
+      }
+    }
+
+    return { deleted, errors }
+  })
+
+  /**
+   * Download Confluence image attachments for a page and save to attachments folder.
+   * Returns array of { filename, savedPath }.
+   */
+  ipcMain.handle('confluence:download-attachments', async (_event, config, vaultPath, targetFolder, pageId) => {
+    const { baseUrl, authType = 'cloud', email, apiToken, bypassSSL = false } = config
+    const base = baseUrl.replace(/\/+$/, '')
+    const headers = buildConfluenceAuthHeaders(authType, email, apiToken)
+    const restBase = getRestApiBase(base)
+
+    // Fetch attachment list
+    const listUrl = `${restBase}/content/${pageId}/child/attachment?expand=version&limit=50&mediaType=image`
+    const res = await net.fetch(listUrl, { headers })
+    if (!res.ok) return []
+    const data = await res.json()
+    const attachments = data.results ?? []
+
+    const resolvedVault = path.resolve(vaultPath)
+    // Images go to vault root attachments/ (per Graph RAG manual: vault/attachments/)
+    const attDir = path.join(resolvedVault, 'attachments')
+    if (!isInsideVault(resolvedVault, attDir)) throw new Error('Attachments dir is outside vault')
+    fs.mkdirSync(attDir, { recursive: true })
+
+    const savedFilePaths = []
+    for (const att of attachments) {
+      // Use path.basename to strip any traversal in server-supplied filename
+      const rawName = att.title ?? att.metadata?.mediaType ?? 'attachment'
+      const filename = path.basename(rawName) || 'attachment'
+      const downloadUrl = att._links?.download
+        ? `${base}${att._links.download}`
+        : `${base}/wiki/download/attachments/${pageId}/${encodeURIComponent(filename)}`
+      try {
+        const imgRes = await withSSLBypass(bypassSSL, () => net.fetch(downloadUrl, { headers }))
+        if (!imgRes.ok) continue
+        const buf = Buffer.from(await imgRes.arrayBuffer())
+        const savedPath = path.join(attDir, filename)
+        if (!isInsideVault(resolvedVault, savedPath)) continue
+        fs.writeFileSync(savedPath, buf)
+        savedFilePaths.push(savedPath)
+      } catch { /* skip failed images */ }
+    }
+    return { downloaded: savedFilePaths.length, files: savedFilePaths }
+  })
+
+  /**
+   * Run a Python script from manual/scripts/ with given args.
+   * Returns { stdout, stderr, exitCode }.
+   */
+  ipcMain.handle('tools:run-script', async (_event, scriptName, args) => {
+    // Reject any scriptName containing path separators or traversal
+    if (!scriptName || typeof scriptName !== 'string' ||
+        scriptName.includes('/') || scriptName.includes('\\') || scriptName.includes('..')) {
+      throw new Error(`Invalid script name: ${scriptName}`)
+    }
+
+    const appDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'manual', 'scripts')
+      : path.join(__dirname, '..', 'manual', 'scripts')
+    const scriptPath = path.resolve(path.join(appDir, scriptName))
+    // Verify resolved path is still inside appDir
+    if (!scriptPath.startsWith(path.resolve(appDir))) {
+      throw new Error(`Script path escapes scripts directory`)
+    }
+    if (!fs.existsSync(scriptPath)) {
+      throw new Error(`스크립트를 찾을 수 없습니다: ${scriptPath}`)
+    }
+
+    return new Promise((resolve) => {
+      const pyCmd = process.platform === 'win32' ? 'python' : 'python3'
+      const proc = spawn(pyCmd, [scriptPath, ...(args ?? [])], {
+        cwd: app.isPackaged ? process.resourcesPath : path.join(__dirname, '..'),
+        env: { ...process.env },
+      })
+      let stdout = ''
+      let stderr = ''
+      proc.stdout.on('data', d => { stdout += d.toString() })
+      proc.stderr.on('data', d => { stderr += d.toString() })
+      let timer = null
+      proc.on('close', exitCode => { if (timer) clearTimeout(timer); resolve({ stdout, stderr, exitCode }) })
+      proc.on('error', err => { if (timer) clearTimeout(timer); resolve({ stdout: '', stderr: err.message, exitCode: -1 }) })
+      // Safety timeout: 60s max per script
+      timer = setTimeout(() => { proc.kill(); resolve({ stdout, stderr: stderr + '\n[TIMEOUT]', exitCode: -1 }) }, 60000)
+    })
+  })
+}
+
 // ── Window creation ────────────────────────────────────────────────────────────
 
 function createWindow() {
@@ -617,6 +922,7 @@ if (!gotTheLock) {
     registerVaultIpcHandlers()
     registerBackendIpcHandlers()
     registerWindowIpcHandlers()
+    registerConfluenceIpcHandlers()
     startPythonBackend()
     createWindow()
 

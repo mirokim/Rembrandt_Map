@@ -170,12 +170,12 @@ export default function Graph2DCanvas({ width, height }: Props) {
       const textColor = getCSSVar('--color-text-secondary', '#888')
       ctx.fillStyle = textColor
       ctx.textAlign = 'center'
-      // Font size in graph-space so screen size stays ~11px regardless of zoom
-      ctx.font = `${11 / scale}px ui-monospace, monospace`
+      // Font size in graph-space so screen size stays ~9px regardless of zoom
+      ctx.font = `${9 / scale}px ui-monospace, monospace`
 
       // Density-aware culling: minimum screen-space gap between label centers
       // At low zoom, only draw labels for selected node + high-degree hubs
-      const MIN_SCREEN_GAP = 48  // px between label positions on screen
+      const MIN_SCREEN_GAP = 64  // px between label positions on screen
       const drawnScreenPos: Array<{ sx: number; sy: number }> = []
       const maxDeg = maxDegreeRef.current
 
