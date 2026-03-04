@@ -94,6 +94,8 @@ interface SettingsState {
   personaDocumentIds: Record<string, string>
   /** Model ID used for AI-generated conversation reports. Empty string = static format only. */
   reportModelId: string
+  /** Multi-agent RAG: cheap worker LLMs summarize secondary docs before chief responds */
+  multiAgentRAG: boolean
 
   setPersonaModel: (persona: DirectorId, modelId: string) => void
   resetPersonaModels: () => void
@@ -123,6 +125,7 @@ interface SettingsState {
   setResponseInstructions: (v: string) => void
   setPersonaDocumentId: (personaId: string, docId: string | null) => void
   setReportModelId: (id: string) => void
+  setMultiAgentRAG: (enabled: boolean) => void
 }
 
 /** Resolve API key for a provider: settings store first, then env var fallback */
@@ -173,6 +176,7 @@ export const useSettingsStore = create<SettingsState>()(
       responseInstructions: DEFAULT_RESPONSE_INSTRUCTIONS,
       personaDocumentIds: {},
       reportModelId: 'claude-sonnet-4-6',
+      multiAgentRAG: true,
 
       setPersonaModel: (persona, modelId) =>
         set((state) => ({
@@ -284,6 +288,7 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       setReportModelId: (reportModelId) => set({ reportModelId }),
+      setMultiAgentRAG: (multiAgentRAG) => set({ multiAgentRAG }),
     }),
     {
       name: 'rembrandt-settings',
@@ -305,6 +310,7 @@ export const useSettingsStore = create<SettingsState>()(
         responseInstructions: state.responseInstructions,
         personaDocumentIds: state.personaDocumentIds,
         reportModelId: state.reportModelId,
+        multiAgentRAG: state.multiAgentRAG,
       }),
       // Migrate persisted data: replace old/removed model IDs with defaults
       merge: (persisted, current) => {

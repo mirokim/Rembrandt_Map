@@ -31,7 +31,7 @@ function EnvHint({ provider }: { provider: string }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AITab() {
-  const { personaModels, setPersonaModel, apiKeys, setApiKey, responseInstructions, setResponseInstructions, reportModelId, setReportModelId } = useSettingsStore()
+  const { personaModels, setPersonaModel, apiKeys, setApiKey, responseInstructions, setResponseInstructions, reportModelId, setReportModelId, multiAgentRAG, setMultiAgentRAG } = useSettingsStore()
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
 
   const toggleKeyVisibility = (id: string) =>
@@ -220,6 +220,34 @@ export default function AITab() {
         <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
           모든 페르소나에 공통 적용되는 응답 형식·태도 지침입니다. 수정하거나 항목을 추가하세요.
         </p>
+      {/* Multi-agent RAG toggle */}
+      <div className="flex items-center justify-between py-2">
+        <div>
+          <p className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            Multi-agent RAG
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+            연관 문서를 저렴한 Worker 모델로 병렬 요약 후 Chief에게 전달. 응답 품질 향상, 레이턴시 소폭 증가.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={multiAgentRAG}
+          onClick={() => setMultiAgentRAG(!multiAgentRAG)}
+          className="shrink-0 ml-4 w-9 h-5 rounded-full transition-colors"
+          style={{
+            background: multiAgentRAG ? 'var(--color-accent)' : 'var(--color-bg-hover)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          <span
+            className="block w-3.5 h-3.5 rounded-full bg-white transition-transform"
+            style={{ transform: multiAgentRAG ? 'translateX(18px)' : 'translateX(2px)', marginTop: 2 }}
+          />
+        </button>
+      </div>
+
         <textarea
           value={responseInstructions}
           onChange={e => setResponseInstructions(e.target.value)}

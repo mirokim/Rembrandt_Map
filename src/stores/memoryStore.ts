@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware'
 interface MemoryState {
   memoryText: string
   setMemoryText: (text: string) => void
+  appendToMemory: (text: string) => void
   clearMemory: () => void
 }
 
@@ -16,6 +17,7 @@ export const useMemoryStore = create<MemoryState>()(
     (set) => ({
       memoryText: '',
       setMemoryText: (text) => set({ memoryText: text }),
+      appendToMemory: (text) => set(s => ({ memoryText: s.memoryText ? s.memoryText + '\n\n' + text : text })),
       clearMemory: () => set({ memoryText: '' }),
     }),
     { name: 'rembrandt-ai-memory' }

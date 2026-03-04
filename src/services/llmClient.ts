@@ -1,4 +1,4 @@
-import type { ChatMessage, SpeakerId, DirectorId, Attachment } from '@/types'
+import type { ChatMessage, SpeakerId, DirectorId, Attachment, LoadedDocument } from '@/types'
 import type { ConversionMeta } from '@/lib/mdConverter'
 import { logger } from '@/lib/logger'
 import { MODEL_OPTIONS, getProviderForModel } from '@/lib/modelConfig'
@@ -198,6 +198,86 @@ async function streamMockResponse(
  */
 const GLOBAL_INTENT_RE = /전체|전반적|모든\s*문서|프로젝트\s*전체|전체적인|overview|전체\s*인사이트|전반|총체적|전체\s*피드백|big.?picture/i
 
+// ── Multi-Agent RAG helpers ───────────────────────────────────────────────────
+
+/** 프로바이더별 가장 저렴한 Worker 모델 ID */
+const WORKER_MODELS: Record<string, string> = {
+  anthropic: 'claude-haiku-4-5-20251001',
+  openai: 'gpt-4.1-mini',
+  gemini: 'gemini-2.5-flash-lite',
+  grok: 'grok-3-mini',
+}
+
+/**
+ * 현재 모델의 프로바이더에서 가장 저렴한 Worker 모델을 반환합니다.
+ * Worker는 문서 요약 등 반복적인 경량 작업에 사용됩니다.
+ */
+function getWorkerModelId(currentModelId: string): { modelId: string; provider: string } {
+  const provider = getProviderForModel(currentModelId) ?? 'anthropic'
+  return { modelId: WORKER_MODELS[provider] ?? currentModelId, provider }
+}
+
+/**
+ * Worker LLM으로 단일 문서를 쿼리 관점에서 요약합니다.
+ * API 오류나 키 없을 때는 본문 앞 300자로 폴백합니다.
+ */
+async function agentSummarizeDoc(
+  doc: LoadedDocument,
+  query: string,
+  apiKey: string,
+  provider: string,
+  workerModelId: string,
+): Promise<string> {
+  const body = getStrippedBody(doc)
+  const content = body.length > 8000 ? body.slice(0, 8000) : body
+  const sysPrompt = '문서를 질문 관점에서 핵심만 200자 이내로 요약하세요. 요약만 출력하세요.'
+  const userMsg = `질문: ${query}\n\n문서(${doc.filename}):\n${content}`
+  let result = ''
+  try {
+    const { streamCompletion } = await import(`./providers/${provider}`)
+    await streamCompletion(
+      apiKey,
+      workerModelId,
+      sysPrompt,
+      [{ role: 'user' as const, content: sanitize(userMsg) }],
+      (c: string) => { result += c },
+    )
+  } catch { result = '' }
+  return result.trim() || body.slice(0, 300)
+}
+
+/**
+ * 최근 대화를 LLM으로 요약합니다.
+ * ChatPanel의 "요약 저장" 버튼에서 호출 → memoryStore.appendToMemory()로 저장.
+ */
+export async function summarizeConversation(
+  messages: ChatMessage[],
+  onChunk: (chunk: string) => void,
+): Promise<void> {
+  const { personaModels } = useSettingsStore.getState()
+  const modelId = personaModels['chief_director']
+  const provider = getProviderForModel(modelId)
+  const apiKey = provider ? getApiKey(provider) : undefined
+  if (!apiKey || !provider) return
+
+  const histText = messages
+    .slice(-20)
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => `${m.role === 'user' ? '👤' : '🤖'} ${m.content.slice(0, 300)}`)
+    .join('\n')
+  const sysPrompt = '대화를 500자 이내로 핵심 결정사항/인사이트/합의된 내용 중심으로 요약하세요.'
+  const userMsg = `다음 대화를 요약해주세요:\n\n${histText}`
+
+  const { streamCompletion } = await import(`./providers/${provider}`)
+  await streamCompletion(
+    apiKey,
+    modelId,
+    sysPrompt,
+    [{ role: 'user' as const, content: sanitize(userMsg) }],
+    onChunk,
+  )
+}
+
 export async function fetchRAGContext(
   userMessage: string,
   currentSpeaker?: string
@@ -221,21 +301,43 @@ export async function fetchRAGContext(
     // score >= 0.2 단일 매칭("회의", "문서" 등 일반 단어)은 오탐지 방지를 위해 BFS 시드로만 사용
     const strongPinnedHits = directHits.filter(r => r.score >= 0.4)
     if (strongPinnedHits.length > 0) {
-      const { loadedDocuments: _docs } = useVaultStore.getState()
+      const { loadedDocuments: _docs, } = useVaultStore.getState()
+      const { multiAgentRAG, personaModels } = useSettingsStore.getState()
       const docMap = new Map(_docs?.map(d => [d.id, d]) ?? [])
+
+      // Top-1: chief가 전체 본문 직접 읽음 (최대 20K자)
+      const topDoc = docMap.get(strongPinnedHits[0].doc_id)
       const pinnedParts: string[] = ['## 직접 지목된 문서 (전체 내용)\n']
-      for (const hit of strongPinnedHits.slice(0, 3)) {
-        const doc = docMap.get(hit.doc_id)
-        if (!doc) continue
-        const body = getStrippedBody(doc)
-        const truncated = body.length > 6000 ? body.slice(0, 6000).trimEnd() + '…' : body
-        pinnedParts.push(`[문서] ${doc.filename.replace(/\.md$/i, '')}\n${truncated}\n\n`)
+      if (topDoc) {
+        const body = getStrippedBody(topDoc)
+        const truncated = body.length > 20000 ? body.slice(0, 20000).trimEnd() + '…' : body
+        pinnedParts.push(`[문서] ${topDoc.filename.replace(/\.md$/i, '')}\n${truncated}\n\n`)
       }
+
+      // Docs 2-5: Worker LLM이 병렬 요약 (multiAgentRAG 설정 on일 때)
+      if (multiAgentRAG && strongPinnedHits.length > 1) {
+        const currentModelId = personaModels[currentSpeaker as DirectorId] ?? personaModels['chief_director']
+        const { modelId: workerModelId, provider: workerProvider } = getWorkerModelId(currentModelId)
+        const workerApiKey = getApiKey(workerProvider as Parameters<typeof getApiKey>[0])
+        if (workerApiKey) {
+          const summaries = await Promise.all(
+            strongPinnedHits.slice(1, 5).map(hit => {
+              const doc = docMap.get(hit.doc_id)
+              return doc
+                ? agentSummarizeDoc(doc, userMessage, workerApiKey, workerProvider, workerModelId)
+                    .then(s => `[Worker 요약] ${doc.filename.replace(/\.md$/i, '')}\n${s}\n`)
+                : Promise.resolve('')
+            })
+          )
+          const summarySection = summaries.filter(Boolean).join('\n')
+          if (summarySection) pinnedParts.push('\n## 연관 문서 요약 (Worker)\n' + summarySection)
+        }
+      }
+
       if (pinnedParts.length > 1) {
         const pinnedCtx = pinnedParts.join('')
-        // 연관 문서도 BFS로 수집 (더 작은 예산으로 추가 컨텍스트 보완)
         const bfsCtx = buildDeepGraphContext(directHits, 2, 10, tokenizeQuery(userMessage))
-        logger.debug(`[RAG] 직접 문서 주입: ${pinnedCtx.length}자, BFS 보완: ${bfsCtx.length}자`)
+        logger.debug(`[RAG] Multi-agent: pinned=${pinnedCtx.length}자, BFS=${bfsCtx.length}자`)
         useGraphStore.getState().setAiHighlightNodes(directHits.map(r => r.doc_id))
         return pinnedCtx + (bfsCtx ? '\n' + bfsCtx : '')
       }
@@ -415,10 +517,43 @@ export async function streamMessage(
   }
 
   // Build message history, excluding the current user message
-  const historyMessages = toHistoryMessages(
+  let historyMessages = toHistoryMessages(
     history.filter((m) => m.content !== userMessage || m.role !== 'user')
   )
-  const cleanSystemPrompt = sanitize(systemPrompt)
+
+  // ── Context compaction: 히스토리가 너무 길면 오래된 대화를 요약해서 시스템 프롬프트에 주입 ──
+  const histChars = historyMessages.reduce((s, m) => s + m.content.length, 0)
+  let finalSystemPrompt = systemPrompt
+  if (histChars > 20_000 && historyMessages.length > 10) {
+    try {
+      const { modelId: wModelId, provider: wProvider } = getWorkerModelId(modelId)
+      const wApiKey = getApiKey(wProvider as Parameters<typeof getApiKey>[0])
+      if (wApiKey) {
+        const oldMessages = historyMessages.slice(0, -8)
+        const recentMessages = historyMessages.slice(-8)
+        const oldText = oldMessages
+          .map(m => `${m.role}: ${m.content.slice(0, 200)}`)
+          .join('\n')
+        let compactSummary = ''
+        const { streamCompletion: wComplete } = await import(`./providers/${wProvider}`)
+        await wComplete(
+          wApiKey, wModelId,
+          '대화 내용을 300자로 요약하세요.',
+          [{ role: 'user' as const, content: sanitize(oldText) }],
+          (c: string) => { compactSummary += c },
+        )
+        if (compactSummary.trim()) {
+          finalSystemPrompt += `\n\n## 이전 대화 요약 (자동 컴팩션)\n${compactSummary.trim()}`
+          historyMessages = recentMessages
+          logger.debug(`[컴팩션] ${histChars}자 → 최근 8개 메시지 + 요약 주입`)
+        }
+      }
+    } catch (e) {
+      logger.warn('[컴팩션] 실패 — 전체 히스토리 사용:', e)
+    }
+  }
+
+  const cleanSystemPrompt = sanitize(finalSystemPrompt)
   const allMessages = [
     ...historyMessages,
     { role: 'user' as const, content: sanitize(fullUserMessage) },
