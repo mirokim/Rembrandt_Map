@@ -8,6 +8,9 @@ import {
   formatCompressedContext,
   getBfsContextDocIds,
   getGlobalContextDocIds,
+  directVaultSearch,
+  getStrippedBody,
+  buildDeepGraphContext,
 } from '@/lib/graphRAG'
 
 // ── Test data ────────────────────────────────────────────────────────────────
@@ -323,5 +326,178 @@ describe('getGlobalContextDocIds', () => {
     const ids = getGlobalContextDocIds()
     const unique = new Set(ids)
     expect(unique.size).toBe(ids.length)
+  })
+})
+
+// ── directVaultSearch ─────────────────────────────────────────────────────────
+
+const DATE_DOC: LoadedDocument = {
+  id: 'feedback_jan28',
+  filename: '[2026.01.28] 피드백 회의.md',
+  folderPath: '',
+  speaker: 'chief_director',
+  date: '2026-01-28',
+  tags: [],
+  links: [],
+  rawContent: '1월 28일 피드백 내용입니다. 이사장님 의견.',
+  sections: [
+    {
+      id: 'fb_s1',
+      heading: '피드백',
+      body: '1월 28일 피드백 내용입니다. 이사장님 의견.',
+      wikiLinks: [],
+    },
+  ],
+  mtime: Date.now(),
+}
+
+describe('directVaultSearch', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ loadedDocuments: [...MOCK_DOCS, DATE_DOC] })
+  })
+
+  it('returns empty array when vault is not loaded', () => {
+    useVaultStore.setState({ loadedDocuments: null })
+    expect(directVaultSearch('피드백')).toEqual([])
+  })
+
+  it('returns empty array when no documents match', () => {
+    expect(directVaultSearch('xyznonexistent')).toEqual([])
+  })
+
+  it('matches date-style filename — numeric terms extracted from query', () => {
+    const results = directVaultSearch('28일 피드백')
+    expect(results.some(r => r.doc_id === 'feedback_jan28')).toBe(true)
+  })
+
+  it('filename match scores top result highest', () => {
+    const results = directVaultSearch('2026 01 28 피드백')
+    expect(results.length).toBeGreaterThan(0)
+    expect(results[0].filename).toBe('[2026.01.28] 피드백 회의.md')
+  })
+
+  it('score is normalised to [0, 1]', () => {
+    const results = directVaultSearch('2026 01 28 피드백')
+    for (const r of results) {
+      expect(r.score).toBeGreaterThanOrEqual(0)
+      expect(r.score).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('strips Korean particles — "이사장님의" matches "이사장님"', () => {
+    const results = directVaultSearch('이사장님의 의견')
+    expect(results.some(r => r.doc_id === 'feedback_jan28')).toBe(true)
+  })
+
+  it('respects topN limit', () => {
+    const results = directVaultSearch('이사장', 2)
+    expect(results.length).toBeLessThanOrEqual(2)
+  })
+
+  it('returned results have correct SearchResult shape', () => {
+    const results = directVaultSearch('피드백')
+    const r = results[0]
+    expect(r).toHaveProperty('doc_id')
+    expect(r).toHaveProperty('filename')
+    expect(r).toHaveProperty('score')
+    expect(r).toHaveProperty('content')
+  })
+})
+
+// ── getStrippedBody ───────────────────────────────────────────────────────────
+
+describe('getStrippedBody', () => {
+  it('returns section bodies joined, without frontmatter YAML', () => {
+    const doc: LoadedDocument = {
+      ...MOCK_DOCS[0],
+      rawContent: '---\nspeaker: chief\n---\n실제 내용',
+      sections: [
+        { id: 's1', heading: '제목', body: '섹션 내용입니다.', wikiLinks: [] },
+      ],
+    }
+    const result = getStrippedBody(doc)
+    expect(result).toContain('섹션 내용입니다.')
+    expect(result).not.toContain('speaker:')
+    expect(result).not.toContain('---')
+  })
+
+  it('includes ### heading prefix for non-intro sections', () => {
+    const doc: LoadedDocument = {
+      ...MOCK_DOCS[0],
+      sections: [
+        { id: 's1', heading: '전투 시스템', body: '전투 내용.', wikiLinks: [] },
+      ],
+    }
+    expect(getStrippedBody(doc)).toContain('### 전투 시스템')
+  })
+
+  it('omits heading prefix for (intro) sections', () => {
+    const doc: LoadedDocument = {
+      ...MOCK_DOCS[0],
+      sections: [
+        { id: 's1', heading: '(intro)', body: '인트로 내용.', wikiLinks: [] },
+      ],
+    }
+    const result = getStrippedBody(doc)
+    expect(result).not.toContain('### (intro)')
+    expect(result).toContain('인트로 내용.')
+  })
+
+  it('falls back to rawContent minus frontmatter when all sections are empty', () => {
+    const doc: LoadedDocument = {
+      ...MOCK_DOCS[0],
+      rawContent: '---\nspeaker: chief\n---\n\n# 실제 마크다운 내용',
+      sections: [{ id: 's1', heading: '(intro)', body: '', wikiLinks: [] }],
+    }
+    const result = getStrippedBody(doc)
+    expect(result).toContain('# 실제 마크다운 내용')
+    expect(result).not.toContain('speaker:')
+  })
+
+  it('returns empty string for doc with no sections and empty rawContent', () => {
+    const doc: LoadedDocument = { ...MOCK_DOCS[0], rawContent: '', sections: [] }
+    expect(getStrippedBody(doc)).toBe('')
+  })
+})
+
+// ── buildDeepGraphContext ─────────────────────────────────────────────────────
+
+describe('buildDeepGraphContext', () => {
+  beforeEach(() => {
+    useGraphStore.setState({ links: MOCK_LINKS })
+    useVaultStore.setState({ loadedDocuments: MOCK_DOCS })
+  })
+
+  it('returns empty string when no documents are loaded', () => {
+    useVaultStore.setState({ loadedDocuments: null })
+    expect(buildDeepGraphContext([makeSearchResult()])).toBe('')
+  })
+
+  it('uses direct-search fallback format when no graph links exist', () => {
+    useGraphStore.setState({ links: [] })
+    const result = buildDeepGraphContext([makeSearchResult()])
+    expect(result).toContain('## 관련 문서 (직접 검색)')
+    expect(result).toContain('[문서] design')
+  })
+
+  it('returns empty string when results are empty and links exist but no seeds', () => {
+    useGraphStore.setState({ links: [] })
+    const result = buildDeepGraphContext([])
+    expect(result).toBe('')
+  })
+
+  it('returns graph-traversal format when links exist', () => {
+    const result = buildDeepGraphContext([makeSearchResult()])
+    expect(result).toContain('## 관련 문서 (그래프 탐색)')
+  })
+
+  it('includes structure header with cluster info', () => {
+    const result = buildDeepGraphContext([makeSearchResult()])
+    expect(result).toContain('## 프로젝트 구조 개요')
+  })
+
+  it('total output stays within DEEP_CONTEXT_BUDGET (16000 chars)', () => {
+    const result = buildDeepGraphContext([makeSearchResult()], 3, 20)
+    expect(result.length).toBeLessThanOrEqual(16_500)
   })
 })

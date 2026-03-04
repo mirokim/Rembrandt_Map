@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { MOCK_NODES, MOCK_LINKS } from '@/data/mockGraph'
 import { DEFAULT_PHYSICS } from '@/stores/graphStore'
 
@@ -35,6 +36,8 @@ beforeEach(async () => {
     hoveredNodeId: null,
     physics: { ...DEFAULT_PHYSICS },
   })
+  // Hover effects only work in non-fast quality mode
+  useSettingsStore.setState({ paragraphRenderQuality: 'medium' })
 })
 
 afterEach(() => {

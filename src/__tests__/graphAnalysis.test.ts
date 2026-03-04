@@ -151,10 +151,10 @@ describe('TfIdfIndex', () => {
 
   // ── serialize / restore ─────────────────────────────────────────────────────
 
-  it('serialize() returns a plain object with schemaVersion=2', () => {
+  it('serialize() returns a plain object with schemaVersion=3', () => {
     index.build(docs)
     const serialized = index.serialize('test-fingerprint')
-    expect(serialized.schemaVersion).toBe(2)
+    expect(serialized.schemaVersion).toBe(3)
     expect(serialized.fingerprint).toBe('test-fingerprint')
     expect(Array.isArray(serialized.idf)).toBe(true)
     expect(Array.isArray(serialized.docs)).toBe(true)

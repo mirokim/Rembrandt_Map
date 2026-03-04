@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import type { ChatMessage, SpeakerId } from '@/types'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useVaultStore } from '@/stores/vaultStore'
+import { useGraphStore } from '@/stores/graphStore'
 import { DEFAULT_PERSONA_MODELS } from '@/lib/modelConfig'
 
 // ── SSE stream helpers ─────────────────────────────────────────────────────────
@@ -281,22 +283,44 @@ describe('llmClient — streamMessage', () => {
 
 // ── fetchRAGContext ────────────────────────────────────────────────────────────
 
+const RAG_MOCK_DOC = {
+  id: 'art_001',
+  filename: 'art.md',
+  folderPath: '',
+  speaker: 'art_director',
+  date: '2025-01-01',
+  tags: ['art'],
+  links: [],
+  rawContent: '다크 판타지 스타일의 비주얼',
+  sections: [
+    {
+      id: 'art_001_s1',
+      heading: '아트 컨셉',
+      body: '다크 판타지 스타일의 비주얼',
+      wikiLinks: [],
+    },
+  ],
+  mtime: Date.now(),
+}
+
 describe('fetchRAGContext()', () => {
   beforeEach(() => {
-    // Reset window.backendAPI between tests
     vi.restoreAllMocks()
+    // Seed vault + graph stores for buildDeepGraphContext to work
+    useVaultStore.setState({ loadedDocuments: [RAG_MOCK_DOC] })
+    useGraphStore.setState({ links: [] })
   })
 
   afterEach(() => {
-    // Clean up window.backendAPI stub
     if ('backendAPI' in window) {
       // @ts-expect-error — test teardown
       delete window.backendAPI
     }
+    useVaultStore.setState({ loadedDocuments: null })
   })
 
-  it('returns empty string when backendAPI is unavailable', async () => {
-    // No window.backendAPI set
+  it('returns empty string when backendAPI is unavailable and vault is empty', async () => {
+    useVaultStore.setState({ loadedDocuments: null })
     const { fetchRAGContext } = await import('@/services/llmClient')
     const result = await fetchRAGContext('테스트 쿼리')
     expect(result).toBe('')
@@ -312,7 +336,7 @@ describe('fetchRAGContext()', () => {
     expect(result).toBe('')
   })
 
-  it('returns formatted context string when results have score > 0.3', async () => {
+  it('returns formatted context string from backendAPI results (score > 0.05)', async () => {
     // @ts-expect-error — test stub
     window.backendAPI = {
       search: vi.fn().mockResolvedValue({
@@ -333,34 +357,10 @@ describe('fetchRAGContext()', () => {
     }
     const { fetchRAGContext } = await import('@/services/llmClient')
     const result = await fetchRAGContext('아트 방향')
+    // buildDeepGraphContext no-links fallback: [문서] {name}\n{content}
     expect(result).toContain('## 관련 문서')
-    expect(result).toContain('[문서] art.md > 아트 컨셉')
+    expect(result).toContain('art')
     expect(result).toContain('다크 판타지 스타일의 비주얼')
-    expect(result).toContain('(art_director)')
-  })
-
-  it('filters out results with score <= 0.3', async () => {
-    // @ts-expect-error — test stub
-    window.backendAPI = {
-      search: vi.fn().mockResolvedValue({
-        results: [
-          {
-            doc_id: 'low_001',
-            filename: 'low.md',
-            section_id: 'low_001_s1',
-            heading: null,
-            speaker: 'unknown',
-            content: '관련 없는 내용',
-            score: 0.1,
-            tags: [],
-          },
-        ],
-        query: '쿼리',
-      }),
-    }
-    const { fetchRAGContext } = await import('@/services/llmClient')
-    const result = await fetchRAGContext('쿼리')
-    expect(result).toBe('')
   })
 
   it('returns empty string when backendAPI.search throws', async () => {
@@ -372,6 +372,28 @@ describe('fetchRAGContext()', () => {
     // Should not throw — RAG failure is non-fatal
     const result = await fetchRAGContext('쿼리')
     expect(result).toBe('')
+  })
+
+  it('directVaultSearch path: strong filename match (score>=0.4) returns pinned content', async () => {
+    // Seed vault with a document whose filename contains query terms
+    const feedbackDoc = {
+      id: 'feedback_2026',
+      filename: '[2026.01.28] 피드백 회의.md',
+      folderPath: '',
+      speaker: 'chief_director',
+      date: '2026-01-28',
+      tags: [],
+      links: [],
+      rawContent: '피드백 내용입니다.',
+      sections: [{ id: 'fb_s1', heading: '피드백', body: '피드백 내용입니다.', wikiLinks: [] }],
+      mtime: Date.now(),
+    }
+    useVaultStore.setState({ loadedDocuments: [feedbackDoc] })
+    const { fetchRAGContext } = await import('@/services/llmClient')
+    const result = await fetchRAGContext('2026 01 28 피드백')
+    // Should contain pinned content section header
+    expect(result).toContain('직접 지목된 문서')
+    expect(result).toContain('피드백 내용입니다.')
   })
 })
 

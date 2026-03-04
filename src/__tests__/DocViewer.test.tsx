@@ -128,6 +128,8 @@ describe('FrontmatterBlock — toggle', () => {
 describe('ParagraphBlock — hover highlight', () => {
   beforeEach(() => {
     useUIStore.setState({ ...useUIStore.getState(), selectedDocId: MOCK_DOCUMENTS[0].id })
+    // Hover only works in 'medium' or 'high' quality — 'fast' disables onMouseEnter
+    useSettingsStore.setState({ paragraphRenderQuality: 'medium' })
   })
 
   it('sets data-hovered on mouse enter', () => {

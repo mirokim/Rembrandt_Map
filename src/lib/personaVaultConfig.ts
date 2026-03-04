@@ -33,9 +33,10 @@ const FILE_BODY =
 // ── Parse ──────────────────────────────────────────────────────────────────────
 
 export function parsePersonaConfig(content: string): VaultPersonaConfig | null {
+  if (!content.trim().startsWith('---')) return null
   try {
     const { data } = matter(content)
-    if (!data || typeof data !== 'object') return null
+    if (!data || typeof data !== 'object' || Object.keys(data).length === 0) return null
     return {
       version: typeof data.version === 'number' ? data.version : 1,
       disabledPersonaIds: Array.isArray(data.disabledPersonaIds)

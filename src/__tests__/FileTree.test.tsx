@@ -29,11 +29,12 @@ describe('FileTree — rendering', () => {
     expect(screen.getByTestId('file-tree')).toBeInTheDocument()
   })
 
-  it('renders all 5 speaker groups', () => {
+  it('renders speaker group headers for documents that exist', () => {
     render(<FileTree />)
-    const groups = screen.getAllByRole('button', { name: /CHIEF|ART|PLAN|LEVEL|PROG/i })
-    // Each SpeakerGroup header button matches
-    expect(groups.length).toBeGreaterThanOrEqual(5)
+    // Labels: Chief, Art, Design, Level (mock docs have no prog_director so Tech is hidden)
+    const groups = screen.getAllByRole('button', { name: /CHIEF|ART|DESIGN|LEVEL|TECH/i })
+    // At least 4 groups from mock data (chief, art, plan→design, level)
+    expect(groups.length).toBeGreaterThanOrEqual(4)
   })
 
   it('shows total document count in footer', () => {
@@ -75,17 +76,17 @@ describe('FileTree — search filtering', () => {
 })
 
 describe('FileTree — document selection', () => {
-  it('clicking a document sets selectedDocId in uiStore', async () => {
+  it('clicking a document opens it in editor via uiStore', async () => {
     render(<FileTree />)
-    // Find the first document item (any file item button)
+    // Find the first document item (any file item button with data-doc-id)
     const docButtons = screen.getAllByRole('button').filter(
       btn => btn.getAttribute('data-doc-id')
     )
     expect(docButtons.length).toBeGreaterThan(0)
     await userEvent.click(docButtons[0])
-    const { selectedDocId, centerTab } = useUIStore.getState()
-    expect(selectedDocId).not.toBeNull()
-    expect(centerTab).toBe('document')
+    const { editingDocId, centerTab } = useUIStore.getState()
+    expect(editingDocId).not.toBeNull()
+    expect(centerTab).toBe('editor')
   })
 })
 

@@ -165,10 +165,10 @@ describe('MessageList — messages', () => {
 })
 
 describe('QuickQuestions', () => {
-  it('renders 6 quick question buttons', () => {
+  it('renders a single quick question button (random pick)', () => {
     render(<ChatPanel />)
     const buttons = screen.getAllByTestId(/^quick-q-/)
-    expect(buttons.length).toBe(6)
+    expect(buttons.length).toBe(1)
   })
 
   it('clicking a quick question sends a message', async () => {

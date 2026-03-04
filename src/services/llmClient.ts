@@ -1,7 +1,7 @@
 import type { ChatMessage, SpeakerId, DirectorId, Attachment, LoadedDocument } from '@/types'
 import type { ConversionMeta } from '@/lib/mdConverter'
 import { logger } from '@/lib/logger'
-import { MODEL_OPTIONS, getProviderForModel } from '@/lib/modelConfig'
+import { MODEL_OPTIONS, getProviderForModel, type ProviderId } from '@/lib/modelConfig'
 import { PERSONA_PROMPTS, buildProjectContext } from '@/lib/personaPrompts'
 import { selectMockResponse } from '@/data/mockResponses'
 import { useSettingsStore, getApiKey } from '@/stores/settingsStore'
@@ -49,7 +49,6 @@ export async function convertToObsidianMD(
     `KEYWORDS: ${meta.title}, ${meta.type}`,
     '',
     '---',
-    `---`,
     `speaker: ${meta.speaker}`,
     `date: ${meta.date}`,
     `tags: [${meta.type}]`,
@@ -122,6 +121,22 @@ export async function convertToObsidianMD(
     }
     default:
       onChunk(fallbackOutput)
+  }
+}
+
+// ── Provider dispatch helper ───────────────────────────────────────────────────
+
+/**
+ * 프로바이더 모듈을 동적 import합니다.
+ * 템플릿 리터럴 대신 switch로 분기하여 Vite 번들러가 청크를 정적 분석할 수 있도록 합니다.
+ */
+async function importProvider(provider: string) {
+  switch (provider) {
+    case 'anthropic': return import('./providers/anthropic')
+    case 'openai':    return import('./providers/openai')
+    case 'gemini':    return import('./providers/gemini')
+    case 'grok':      return import('./providers/grok')
+    default: throw new Error(`Unknown provider: ${provider}`)
   }
 }
 
@@ -234,7 +249,7 @@ async function agentSummarizeDoc(
   const userMsg = `질문: ${query}\n\n문서(${doc.filename}):\n${content}`
   let result = ''
   try {
-    const { streamCompletion } = await import(`./providers/${provider}`)
+    const { streamCompletion } = await importProvider(provider)
     await streamCompletion(
       apiKey,
       workerModelId,
@@ -268,7 +283,7 @@ export async function summarizeConversation(
   const sysPrompt = '대화를 500자 이내로 핵심 결정사항/인사이트/합의된 내용 중심으로 요약하세요.'
   const userMsg = `다음 대화를 요약해주세요:\n\n${histText}`
 
-  const { streamCompletion } = await import(`./providers/${provider}`)
+  const { streamCompletion } = await importProvider(provider)
   await streamCompletion(
     apiKey,
     modelId,
@@ -318,7 +333,7 @@ export async function fetchRAGContext(
       if (multiAgentRAG && strongPinnedHits.length > 1) {
         const currentModelId = personaModels[currentSpeaker as DirectorId] ?? personaModels['chief_director']
         const { modelId: workerModelId, provider: workerProvider } = getWorkerModelId(currentModelId)
-        const workerApiKey = getApiKey(workerProvider as Parameters<typeof getApiKey>[0])
+        const workerApiKey = getApiKey(workerProvider as ProviderId)
         if (workerApiKey) {
           const summaries = await Promise.all(
             strongPinnedHits.slice(1, 5).map(hit => {
@@ -527,7 +542,7 @@ export async function streamMessage(
   if (histChars > 20_000 && historyMessages.length > 10) {
     try {
       const { modelId: wModelId, provider: wProvider } = getWorkerModelId(modelId)
-      const wApiKey = getApiKey(wProvider as Parameters<typeof getApiKey>[0])
+      const wApiKey = getApiKey(wProvider as ProviderId)
       if (wApiKey) {
         const oldMessages = historyMessages.slice(0, -8)
         const recentMessages = historyMessages.slice(-8)
@@ -535,7 +550,7 @@ export async function streamMessage(
           .map(m => `${m.role}: ${m.content.slice(0, 200)}`)
           .join('\n')
         let compactSummary = ''
-        const { streamCompletion: wComplete } = await import(`./providers/${wProvider}`)
+        const { streamCompletion: wComplete } = await importProvider(wProvider)
         await wComplete(
           wApiKey, wModelId,
           '대화 내용을 300자로 요약하세요.',

@@ -146,28 +146,31 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel />)
     expect(screen.getByText('Chief')).toBeInTheDocument()
     expect(screen.getByText('Art')).toBeInTheDocument()
-    expect(screen.getByText('Plan')).toBeInTheDocument()
+    expect(screen.getByText('Design')).toBeInTheDocument()
     expect(screen.getByText('Level')).toBeInTheDocument()
     expect(screen.getByText('Tech')).toBeInTheDocument()
   })
 
-  // ── VaultSelector section ──────────────────────────────────────────────────
+  // ── VaultSelector section (in '일반' tab) ────────────────────────────────────
 
-  it('renders the vault section', () => {
+  it('renders the vault section after switching to 일반 tab', () => {
     resetStore(true)
     render(<SettingsPanel />)
+    fireEvent.click(screen.getByText('일반'))
     expect(screen.getByTestId('vault-section')).toBeInTheDocument()
   })
 
-  it('renders the vault-selector within the panel', () => {
+  it('renders the vault-selector within the 일반 tab', () => {
     resetStore(true)
     render(<SettingsPanel />)
+    fireEvent.click(screen.getByText('일반'))
     expect(screen.getByTestId('vault-selector')).toBeInTheDocument()
   })
 
-  it('renders vault-select-btn', () => {
+  it('renders vault-select-btn in 일반 tab', () => {
     resetStore(true)
     render(<SettingsPanel />)
+    fireEvent.click(screen.getByText('일반'))
     expect(screen.getByTestId('vault-select-btn')).toBeInTheDocument()
   })
 })

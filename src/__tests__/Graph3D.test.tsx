@@ -42,6 +42,7 @@ vi.mock('three', () => {
   }
   class Mesh {
     position = new V3()
+    scale = { setScalar(_s: number) {} }
     userData: any = {}
     visible = true
     material = { color: { setHex() {} } }
@@ -88,6 +89,7 @@ vi.mock('three', () => {
     BufferAttribute: BufAttr,
     Mesh,
     SphereGeometry: class { dispose() {} },
+    OctahedronGeometry: class { dispose() {} },
     MeshBasicMaterial: class { opacity = 1; transparent = true },
     LineBasicMaterial: class {},
     LineDashedMaterial: class { color = { setHex() {} } },
@@ -259,8 +261,9 @@ describe('Graph3D — click handling', () => {
     fireEvent.mouseUp(el, { clientX: 400, clientY: 300 })
 
     expect(useGraphStore.getState().selectedNodeId).toBe(firstNode.id)
-    expect(useUIStore.getState().centerTab).toBe('document')
-    expect(useUIStore.getState().selectedDocId).toBe(firstNode.docId)
+    // Graph3D uses openInEditor on node click → centerTab becomes 'editor'
+    expect(useUIStore.getState().centerTab).toBe('editor')
+    expect(useUIStore.getState().editingDocId).toBe(firstNode.id)
   })
 })
 
