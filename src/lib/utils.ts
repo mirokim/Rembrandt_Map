@@ -27,7 +27,7 @@ export function truncate(text: string, max = 40): string {
  *  ![[embed]] 형식의 이미지 임베드는 제외합니다. */
 export function extractWikiLinks(text: string): string[] {
   // negative lookbehind: '!' 바로 앞에 오는 [[...]] 는 이미지 임베드이므로 제외
-  const matches = text.match(/(?<!!)\[\[([^\]]+)\]\]/g) ?? []
+  const matches = text.match(/(?<!!)\[\[(.*?)\]\]/gs) ?? []
   return matches.map(m => m.slice(2, -2).trim())
 }
 

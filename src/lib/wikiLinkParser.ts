@@ -15,7 +15,7 @@ export interface WikiLinkSegment {
 
 export type ParsedSegment = TextSegment | WikiLinkSegment
 
-const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g
+const WIKI_LINK_RE = /\[\[(.*?)\]\]/gs
 
 /**
  * Split `text` into plain-text and wiki-link segments.
