@@ -16,6 +16,7 @@ import {
 } from '@/lib/graphRAG'
 import { useGraphStore } from '@/stores/graphStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useMemoryStore } from '@/stores/memoryStore'
 
 // ── Obsidian MD conversion (MD 변환 에디터 파이프라인) ─────────────────────────
 
@@ -355,12 +356,18 @@ export async function streamMessage(
     }
   }
 
+  // ── AI 장기 기억 주입 ────────────────────────────────────────────────────────
+  const { memoryText } = useMemoryStore.getState()
+  const memoryContext = memoryText.trim()
+    ? `\n\n---\n## 📌 이전 대화 기억\n${memoryText.trim()}\n---`
+    : ''
+
   // ── Graph-Augmented RAG context injection ──────────────────────────────────
   // overrideRagContext가 있으면 키워드 검색 없이 그대로 사용 (노드 직접 선택 분석 등)
   const ragContext = overrideRagContext !== undefined
     ? overrideRagContext
     : await fetchRAGContext(userMessage, persona)
-  const systemPrompt = projectContext + basePrompt + personaDocContext + (responseInstructions.trim() ? '\n\n' + responseInstructions.trim() : '')
+  const systemPrompt = projectContext + basePrompt + personaDocContext + memoryContext + (responseInstructions.trim() ? '\n\n' + responseInstructions.trim() : '')
 
   // ── Attachment processing ───────────────────────────────────────────────────
   // Separate image attachments (→ vision API) from text attachments (→ message injection)
