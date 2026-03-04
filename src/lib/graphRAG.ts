@@ -253,6 +253,73 @@ export function frontendKeywordSearch(
   return scored.slice(0, topN).map(s => s.result)
 }
 
+// ── Direct string search (simple grep-style fallback) ────────────────────────
+
+/**
+ * 볼트 전체 문서를 쿼리 단어로 직접 문자열 검색합니다.
+ *
+ * TF-IDF/BFS로 찾지 못한 문서를 보완하는 단순 폴백.
+ * 파일명 매칭은 가중치 2배, 본문 매칭은 1배.
+ */
+export function directVaultSearch(
+  query: string,
+  topN: number = 5,
+): SearchResult[] {
+  const { loadedDocuments } = useVaultStore.getState()
+  if (!loadedDocuments?.length) return []
+
+  // 쿼리를 공백 기준 분리 (2자 이상만)
+  const terms = query
+    .split(/\s+/)
+    .map(t => t.toLowerCase())
+    .filter(t => t.length >= 2)
+  if (terms.length === 0) return []
+
+  const scored: { doc: LoadedDocument; score: number; bestSection: DocSection | null }[] = []
+
+  for (const doc of loadedDocuments) {
+    const filename = doc.filename.toLowerCase()
+    const raw = (doc.rawContent ?? '').toLowerCase()
+
+    let score = 0
+    for (const term of terms) {
+      if (filename.includes(term)) score += 2  // 파일명 매칭 2배 가중치
+      else if (raw.includes(term)) score += 1
+    }
+    if (score === 0) continue
+
+    // 쿼리 단어와 가장 많이 겹치는 섹션 선택
+    let bestSection: DocSection | null = null
+    let bestSectionScore = -1
+    for (const section of doc.sections) {
+      if (!section.body.trim()) continue
+      const text = `${section.heading} ${section.body}`.toLowerCase()
+      const sScore = terms.filter(t => text.includes(t)).length
+      if (sScore > bestSectionScore) {
+        bestSectionScore = sScore
+        bestSection = section
+      }
+    }
+
+    scored.push({ doc, score, bestSection })
+  }
+
+  scored.sort((a, b) => b.score - a.score)
+
+  return scored.slice(0, topN).map(({ doc, score, bestSection }) => ({
+    doc_id: doc.id,
+    filename: doc.filename,
+    section_id: bestSection?.id ?? '',
+    heading: bestSection?.heading ?? '',
+    speaker: doc.speaker,
+    content: bestSection
+      ? (bestSection.body.length > 500 ? bestSection.body.slice(0, 500).trimEnd() + '…' : bestSection.body)
+      : '',
+    score: Math.min(1, score * 0.1),  // 정규화
+    tags: doc.tags ?? [],
+  } satisfies SearchResult))
+}
+
 // ── Graph data cache ────────────────────────────────────────────────────────
 
 let _cachedAdjacency: Map<string, string[]> | null = null

@@ -12,6 +12,7 @@ import {
   buildGlobalGraphContext,
   getGlobalContextDocIds,
   tokenizeQuery,
+  directVaultSearch,
 } from '@/lib/graphRAG'
 import { useGraphStore } from '@/stores/graphStore'
 import { useVaultStore } from '@/stores/vaultStore'
@@ -256,38 +257,14 @@ export async function fetchRAGContext(
       })
     }
 
-    // Stage 3b: 파일명 직접 매칭 — 쿼리 토큰이 파일명에 포함된 문서를 시드에 강제 추가
-    // TF-IDF가 날짜형 파일명([2026.01.28] 등)을 직접 찾지 못할 때 보완
-    const _qTerms = tokenizeQuery(userMessage)
+    // Stage 3b: 직접 문자열 검색 — vault 전체에서 쿼리 단어를 그렙 방식으로 검색
+    // TF-IDF/BFS가 날짜형·특수 파일명을 놓칠 때 보완
+    const _directHits = directVaultSearch(userMessage, 5)
     const _existingIds = new Set(reranked.map(r => r.doc_id))
-    const { loadedDocuments: _allDocs } = useVaultStore.getState()
-    if (_allDocs && _qTerms.length > 0) {
-      const filenameSeeds = _allDocs
-        .filter(doc => {
-          if (_existingIds.has(doc.id)) return false
-          const nameTokens = new Set(tokenizeQuery(doc.filename.replace(/\.md$/i, '')))
-          return _qTerms.some(t => t.length >= 2 && nameTokens.has(t))
-        })
-        .slice(0, 3)
-        .map(doc => {
-          const firstSection = doc.sections.find(s => s.body.trim())
-          return {
-            doc_id: doc.id,
-            filename: doc.filename,
-            section_id: firstSection?.id ?? '',
-            heading: firstSection?.heading ?? '',
-            speaker: doc.speaker,
-            content: firstSection
-              ? (firstSection.body.length > 400 ? firstSection.body.slice(0, 400).trimEnd() + '…' : firstSection.body)
-              : '',
-            score: 0.5,
-            tags: doc.tags ?? [],
-          } satisfies import('@/types').SearchResult
-        })
-      if (filenameSeeds.length > 0) {
-        logger.debug(`[RAG] 파일명 시드 추가: ${filenameSeeds.map(s => s.filename).join(', ')}`)
-        reranked.push(...filenameSeeds)
-      }
+    const _newHits = _directHits.filter(r => !_existingIds.has(r.doc_id))
+    if (_newHits.length > 0) {
+      logger.debug(`[RAG] 직접 검색 보완: ${_newHits.map(r => r.filename).join(', ')}`)
+      reranked.push(..._newHits.slice(0, 3))
     }
 
     // Stage 4: BFS 그래프 탐색 — 연결된 문서들을 최대 3홉까지 수집
