@@ -149,7 +149,13 @@ contextBridge.exposeInMainWorld('ragAPI', {
     ipcRenderer.on('rag:search', listener)
     return () => ipcRenderer.removeListener('rag:search', listener)
   },
-  /** Send search results back to the HTTP server (via main process). */
+  /** Listen for settings requests from the HTTP server (via main process). */
+  onGetSettings: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('rag:get-settings', listener)
+    return () => ipcRenderer.removeListener('rag:get-settings', listener)
+  },
+  /** Send results/settings back to the HTTP server (via main process). */
   sendResult: (requestId, results) => {
     ipcRenderer.send('rag:result', { requestId, results })
   },

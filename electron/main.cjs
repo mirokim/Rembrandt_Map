@@ -888,45 +888,37 @@ const _ragResolvers = new Map()
 function startRagApiServer() {
   const http = require('http')
 
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url, `http://127.0.0.1:${RAG_API_PORT}`)
-    if (url.pathname !== '/search') {
-      res.writeHead(404)
-      res.end('{"error":"not found"}')
-      return
-    }
-
-    const query = url.searchParams.get('q') || ''
-    const topN  = Math.min(parseInt(url.searchParams.get('n') || '5'), 20)
-
-    if (!query.trim()) {
-      res.writeHead(400)
-      res.end('{"error":"query required"}')
-      return
-    }
-
-    const requestId = `${Date.now()}-${Math.random()}`
-    const timer = setTimeout(() => {
-      _ragResolvers.delete(requestId)
-      res.writeHead(504)
-      res.end('{"error":"timeout"}')
-    }, 15000)
-
-    _ragResolvers.set(requestId, (results) => {
-      clearTimeout(timer)
-      _ragResolvers.delete(requestId)
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-      res.end(JSON.stringify(results))
+  function ipcRequest(ipcChannel, payload, timeoutMs = 10000) {
+    return new Promise((resolve) => {
+      if (!mainWindow) { resolve(null); return }
+      const requestId = `${Date.now()}-${Math.random()}`
+      const timer = setTimeout(() => { _ragResolvers.delete(requestId); resolve(null) }, timeoutMs)
+      _ragResolvers.set(requestId, (data) => { clearTimeout(timer); _ragResolvers.delete(requestId); resolve(data) })
+      mainWindow.webContents.send(ipcChannel, { requestId, ...payload })
     })
+  }
 
-    if (mainWindow) {
-      mainWindow.webContents.send('rag:search', { requestId, query, topN })
-    } else {
-      clearTimeout(timer)
-      _ragResolvers.delete(requestId)
-      res.writeHead(503)
-      res.end('{"error":"window not ready"}')
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, `http://127.0.0.1:${RAG_API_PORT}`)
+    const send = (status, data) => {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(data))
     }
+
+    if (url.pathname === '/settings') {
+      const data = await ipcRequest('rag:get-settings', {})
+      return data ? send(200, data) : send(503, { error: 'unavailable' })
+    }
+
+    if (url.pathname === '/search') {
+      const query = url.searchParams.get('q') || ''
+      const topN  = Math.min(parseInt(url.searchParams.get('n') || '5'), 20)
+      if (!query.trim()) return send(400, { error: 'query required' })
+      const results = await ipcRequest('rag:search', { query, topN }, 15000)
+      return results ? send(200, results) : send(504, { error: 'timeout' })
+    }
+
+    send(404, { error: 'not found' })
   })
 
   ipcMain.on('rag:result', (_event, { requestId, results }) => {

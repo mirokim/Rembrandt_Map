@@ -6,6 +6,7 @@
  */
 import { useEffect } from 'react'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { tfidfIndex } from '@/lib/graphAnalysis'
 import { directVaultSearch } from '@/lib/graphRAG'
 import type { RagDocResult } from '@/vite-env'
@@ -67,6 +68,12 @@ export function useRagApi() {
       }
     })
 
-    return cleanup
+    // Handle settings requests
+    const cleanupSettings = window.ragAPI.onGetSettings(({ requestId }) => {
+      const { personaModels } = useSettingsStore.getState()
+      window.ragAPI!.sendResult(requestId, { personaModels })
+    })
+
+    return () => { cleanup(); cleanupSettings() }
   }, [])
 }

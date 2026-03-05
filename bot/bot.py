@@ -226,14 +226,13 @@ class SlackBotRunner:
 
         from modules.persona_config import resolve_persona
         from modules.rag_simple import search_vault, build_rag_context
-        from modules.rag_electron import search_via_electron
+        from modules.rag_electron import search_via_electron, get_model_for_tag
 
         cfg = self.cfg
         bot_token  = cfg.get("slack_bot_token", "").strip()
         app_token  = cfg.get("slack_app_token", "").strip()
         vault_path = cfg.get("vault_path", "").strip()
         api_key    = cfg.get("claude_api_key", "").strip()
-        model      = cfg.get("slack_model", "claude-sonnet-4-6")
         top_n      = cfg.get("slack_rag_top_n", 5)
 
         if not bot_token or not app_token:
@@ -244,8 +243,7 @@ class SlackBotRunner:
             return False
 
         import re as _re
-        claude = ClaudeClient(api_key, model) if api_key else None
-        web    = WebClient(token=bot_token)
+        web = WebClient(token=bot_token)
         app    = App(token=bot_token)
 
         PERSONA_TAG_RE = _re.compile(r"\[([^\]]+)\]")
@@ -286,6 +284,11 @@ class SlackBotRunner:
             else:
                 self._log(f"[RAG] Electron TF-IDF ({len(results)}건)")
             rag_context = build_rag_context(results, max_chars=6000)
+
+            # 페르소나별 모델을 Electron 설정에서 가져옴
+            model  = get_model_for_tag(tag)
+            claude = ClaudeClient(api_key, model) if api_key else None
+            self._log(f"[모델] {model}")
 
             if claude:
                 system = persona["system"] + (f"\n\n{rag_context}" if rag_context else "")
@@ -499,21 +502,21 @@ class App(tk.Tk):
 
         self.var_slack_bot_token = tk.StringVar()
         self.var_slack_app_token = tk.StringVar()
-        self.var_slack_model     = tk.StringVar()
         self.var_slack_top_n     = tk.IntVar(value=5)
 
         slack_row(0, "Bot Token (xoxb-...):  ", self.var_slack_bot_token, show="*")
         slack_row(1, "App Token (xapp-...):  ", self.var_slack_app_token, show="*")
-        slack_row(2, "모델:                  ", self.var_slack_model)
 
-        ttk.Label(slack_cfg, text="RAG top-N:").grid(row=3, column=0, sticky="w", padx=6, pady=3)
+        ttk.Label(slack_cfg, text="RAG top-N:").grid(row=2, column=0, sticky="w", padx=6, pady=3)
         ttk.Spinbox(slack_cfg, textvariable=self.var_slack_top_n,
-                    from_=1, to=20, width=5).grid(row=3, column=1, sticky="w", padx=4)
+                    from_=1, to=20, width=5).grid(row=2, column=1, sticky="w", padx=4)
+        ttk.Label(slack_cfg, text="(모델은 렘브란트 맵 설정을 따름)",
+                  foreground="gray").grid(row=3, column=0, columnspan=2, sticky="w", padx=6)
         slack_cfg.columnconfigure(1, weight=1)
 
         # 저장 버튼
         ttk.Button(slack_cfg, text="저장", command=self._save_cfg, width=6).grid(
-            row=3, column=1, sticky="e", padx=4)
+            row=2, column=1, sticky="e", padx=4)
 
         # 제어 영역
         slack_ctrl = ttk.Frame(tab_slack)
@@ -542,7 +545,6 @@ class App(tk.Tk):
         self.var_interval.set(self.cfg.get("interval_hours", 1))
         self.var_slack_bot_token.set(self.cfg.get("slack_bot_token", ""))
         self.var_slack_app_token.set(self.cfg.get("slack_app_token", ""))
-        self.var_slack_model.set(self.cfg.get("slack_model", "claude-sonnet-4-6"))
         self.var_slack_top_n.set(self.cfg.get("slack_rag_top_n", 5))
         self.after(100, self._refresh_index_list)  # UI 초기화 후 인덱스 목록 로드
 
@@ -552,7 +554,6 @@ class App(tk.Tk):
         self.cfg["interval_hours"]   = self.var_interval.get()
         self.cfg["slack_bot_token"]  = self.var_slack_bot_token.get().strip()
         self.cfg["slack_app_token"]  = self.var_slack_app_token.get().strip()
-        self.cfg["slack_model"]      = self.var_slack_model.get().strip()
         self.cfg["slack_rag_top_n"]  = self.var_slack_top_n.get()
         save_config(self.cfg)
         self._log("💾 설정 저장됨")

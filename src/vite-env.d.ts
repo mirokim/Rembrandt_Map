@@ -54,7 +54,8 @@ declare global {
     // ── ragAPI (Slack RAG bridge) ─────────────────────────────────────────────
     ragAPI?: {
       onSearch(callback: (data: { requestId: string; query: string; topN: number }) => void): () => void
-      sendResult(requestId: string, results: RagDocResult[]): void
+      onGetSettings(callback: (data: { requestId: string }) => void): () => void
+      sendResult(requestId: string, results: unknown): void
     }
 
     // ── backendAPI (Phase 1-3) ────────────────────────────────────────────────
