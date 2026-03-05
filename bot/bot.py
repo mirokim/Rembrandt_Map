@@ -1,10 +1,11 @@
 """
-Rembrandt Map Bot — 볼트 관리 + Slack 봇 통합 GUI
-──────────────────────────────────────────────
+Rembrandt Map Source Management Bot — 볼트 관리 + Slack 봇 통합 GUI
+──────────────────────────────────────────────────────────────────
 기능:
   - vault MD 파일 스캔 + keyword_index.json 자동 관리
   - wikilink 주입 + 클러스터 링크 강화
   - index_YYYYMMDD.md 자동 갱신 (타이머 1h / 5h)
+  - index MD 파일 브라우저 (생성된 인덱스 열람)
   - Slack 봇 (Socket Mode, 페르소나 + RAG)
 
 실행:
@@ -333,7 +334,7 @@ class SlackBotRunner:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Vault Bot — Rembrandt Map")
+        self.title("Rembrandt Map Source Management Bot")
         self.geometry("720x640")
         self.resizable(True, True)
         self.cfg = load_config()
@@ -440,6 +441,42 @@ class App(tk.Tk):
         self.kw_menu.add_command(label="삭제", command=self._delete_keyword)
         self.kw_tree.bind("<Button-3>", self._show_kw_menu)
 
+        # ── 인덱스 파일 탭 ────────────────────────────────────────────────────
+        tab_idx = ttk.Frame(self.notebook)
+        self.notebook.add(tab_idx, text="📄 인덱스 파일")
+
+        idx_top = ttk.Frame(tab_idx)
+        idx_top.pack(fill="x", padx=6, pady=4)
+        self.lbl_idx_count = ttk.Label(idx_top, text="인덱스 파일: 0개")
+        self.lbl_idx_count.pack(side="left")
+        ttk.Button(idx_top, text="새로고침", command=self._refresh_index_list).pack(side="left", padx=8)
+
+        idx_pane = tk.PanedWindow(tab_idx, orient="horizontal", sashwidth=5, relief="flat")
+        idx_pane.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        # 왼쪽: 파일 목록
+        list_frame = ttk.Frame(idx_pane)
+        self.idx_listbox = tk.Listbox(list_frame, width=30, selectmode="single",
+                                      font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4",
+                                      selectbackground="#264f78", activestyle="none")
+        self.idx_listbox.pack(fill="both", expand=True, side="left")
+        lbscroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.idx_listbox.yview)
+        self.idx_listbox.configure(yscrollcommand=lbscroll.set)
+        lbscroll.pack(side="right", fill="y")
+        self.idx_listbox.bind("<<ListboxSelect>>", self._on_index_select)
+        idx_pane.add(list_frame, minsize=160)
+
+        # 오른쪽: 파일 내용
+        content_frame = ttk.Frame(idx_pane)
+        self.idx_content = scrolledtext.ScrolledText(
+            content_frame, wrap="word", state="disabled",
+            font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
+        self.idx_content.pack(fill="both", expand=True)
+        idx_pane.add(content_frame, minsize=300)
+
+        # 파일 경로 저장용
+        self._idx_paths: list[str] = []
+
         # ── Slack 봇 탭 ──────────────────────────────────────────────────────
         tab_slack = ttk.Frame(self.notebook)
         self.notebook.add(tab_slack, text="💬 Slack 봇")
@@ -500,6 +537,7 @@ class App(tk.Tk):
         self.var_slack_app_token.set(self.cfg.get("slack_app_token", ""))
         self.var_slack_model.set(self.cfg.get("slack_model", "claude-sonnet-4-6"))
         self.var_slack_top_n.set(self.cfg.get("slack_rag_top_n", 5))
+        self.after(100, self._refresh_index_list)  # UI 초기화 후 인덱스 목록 로드
 
     def _save_cfg(self):
         self.cfg["vault_path"]       = self.var_vault.get().strip()
@@ -563,6 +601,7 @@ class App(tk.Tk):
         def _main():
             self._set_running(False)
             self._refresh_keywords()
+            self._refresh_index_list()
             if self.timer_running and self.cfg["interval_hours"] > 0:
                 h = self.cfg["interval_hours"]
                 self._next_run_time = datetime.now() + timedelta(hours=h)
@@ -691,6 +730,46 @@ class App(tk.Tk):
         ttk.Button(btn_frm, text="추가", command=on_ok, width=10).pack(side="left", padx=4)
         ttk.Button(btn_frm, text="취소", command=dialog.destroy, width=10).pack(side="left", padx=4)
         frm.columnconfigure(1, weight=1)
+
+    # ── 인덱스 파일 탭 ────────────────────────────────────────────────────────
+
+    def _refresh_index_list(self):
+        vault = self.var_vault.get().strip()
+        if not vault or not Path(vault).exists():
+            return
+        # vault 전체에서 index_*.md 파일 수집
+        paths = sorted(
+            Path(vault).rglob("index_*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        self._idx_paths = [str(p) for p in paths]
+        self.lbl_idx_count.config(text=f"인덱스 파일: {len(paths)}개")
+        self.idx_listbox.delete(0, "end")
+        for p in paths:
+            # 상대 경로로 표시
+            try:
+                rel = p.relative_to(vault)
+            except ValueError:
+                rel = p
+            self.idx_listbox.insert("end", str(rel))
+
+    def _on_index_select(self, event=None):
+        sel = self.idx_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if idx >= len(self._idx_paths):
+            return
+        path = Path(self._idx_paths[idx])
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception as e:
+            content = f"❌ 파일 읽기 실패: {e}"
+        self.idx_content.configure(state="normal")
+        self.idx_content.delete("1.0", "end")
+        self.idx_content.insert("end", content)
+        self.idx_content.configure(state="disabled")
 
     # ── Slack 탭 ─────────────────────────────────────────────────────────────
 
