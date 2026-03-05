@@ -1,19 +1,17 @@
 """
-Vault Bot — Rembrandt Map 볼트 관리 봇
-────────────────────────────────────
+Rembrandt Map Bot — 볼트 관리 + Slack 봇 통합 GUI
+──────────────────────────────────────────────
 기능:
-  - vault MD 파일 스캔
-  - keyword_index.json 자동 관리 (Claude Haiku 기반 키워드 발견)
+  - vault MD 파일 스캔 + keyword_index.json 자동 관리
   - wikilink 주입 + 클러스터 링크 강화
-  - index_YYYYMMDD.md 자동 갱신
-  - 타이머 기반 자동 실행 (1h / 5h)
+  - index_YYYYMMDD.md 자동 갱신 (타이머 1h / 5h)
+  - Slack 봇 (Socket Mode, 페르소나 + RAG)
 
 실행:
     python bot.py
 """
 
 import json
-import os
 import sys
 import threading
 import time
@@ -202,12 +200,6 @@ class VaultBot:
 # Slack Bot Runner
 # ─────────────────────────────────────────────────────────────────────────────
 
-# slack_bot/ 폴더의 모듈 경로 추가 (vault_scanner 공유)
-_SLACK_BOT_DIR = Path(__file__).parent.parent / "slack_bot"
-if _SLACK_BOT_DIR.exists() and str(_SLACK_BOT_DIR) not in sys.path:
-    sys.path.insert(0, str(_SLACK_BOT_DIR))
-
-
 class SlackBotRunner:
     """Slack SocketModeHandler를 백그라운드 스레드로 관리."""
 
@@ -231,16 +223,8 @@ class SlackBotRunner:
             self._log("❌ slack-bolt 패키지 필요: pip install slack-bolt")
             return False
 
-        if not _SLACK_BOT_DIR.exists():
-            self._log("❌ slack_bot/ 폴더가 없습니다.")
-            return False
-
-        try:
-            from modules.persona_config import resolve_persona
-            from modules.rag_simple import search_vault, build_rag_context
-        except ImportError as e:
-            self._log(f"❌ slack_bot 모듈 로드 실패: {e}")
-            return False
+        from modules.persona_config import resolve_persona
+        from modules.rag_simple import search_vault, build_rag_context
 
         cfg = self.cfg
         bot_token  = cfg.get("slack_bot_token", "").strip()
@@ -257,10 +241,10 @@ class SlackBotRunner:
             self._log(f"❌ 볼트 경로 없음: {vault_path!r}")
             return False
 
+        import re as _re
         claude = ClaudeClient(api_key, model) if api_key else None
         web    = WebClient(token=bot_token)
         app    = App(token=bot_token)
-        import re as _re
 
         PERSONA_TAG_RE = _re.compile(r"\[([^\]]+)\]")
         BOT_MENTION_RE = _re.compile(r"<@[A-Z0-9]+>")
