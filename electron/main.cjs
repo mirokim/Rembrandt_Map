@@ -881,6 +881,64 @@ if (!gotTheLock) {
     }
   })
 
+// ── RAG API HTTP server (Slack bot bridge) ─────────────────────────────────────
+const RAG_API_PORT = 7331
+const _ragResolvers = new Map()
+
+function startRagApiServer() {
+  const http = require('http')
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://127.0.0.1:${RAG_API_PORT}`)
+    if (url.pathname !== '/search') {
+      res.writeHead(404)
+      res.end('{"error":"not found"}')
+      return
+    }
+
+    const query = url.searchParams.get('q') || ''
+    const topN  = Math.min(parseInt(url.searchParams.get('n') || '5'), 20)
+
+    if (!query.trim()) {
+      res.writeHead(400)
+      res.end('{"error":"query required"}')
+      return
+    }
+
+    const requestId = `${Date.now()}-${Math.random()}`
+    const timer = setTimeout(() => {
+      _ragResolvers.delete(requestId)
+      res.writeHead(504)
+      res.end('{"error":"timeout"}')
+    }, 15000)
+
+    _ragResolvers.set(requestId, (results) => {
+      clearTimeout(timer)
+      _ragResolvers.delete(requestId)
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(results))
+    })
+
+    if (mainWindow) {
+      mainWindow.webContents.send('rag:search', { requestId, query, topN })
+    } else {
+      clearTimeout(timer)
+      _ragResolvers.delete(requestId)
+      res.writeHead(503)
+      res.end('{"error":"window not ready"}')
+    }
+  })
+
+  ipcMain.on('rag:result', (_event, { requestId, results }) => {
+    const resolve = _ragResolvers.get(requestId)
+    if (resolve) resolve(results)
+  })
+
+  server.listen(RAG_API_PORT, '127.0.0.1', () => {
+    console.log(`[RAG API] http://127.0.0.1:${RAG_API_PORT}`)
+  })
+}
+
   app.whenReady().then(() => {
     // ── rembrandt-img:// protocol — serve vault images directly from disk ──────
     // This replaces the data-URL/IPC approach: no base64 encoding, no size limits,
@@ -925,6 +983,7 @@ if (!gotTheLock) {
     registerConfluenceIpcHandlers()
     startPythonBackend()
     createWindow()
+    startRagApiServer()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

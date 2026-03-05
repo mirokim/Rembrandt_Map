@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useUIStore } from '@/stores/uiStore'
 import { useVaultLoader } from '@/hooks/useVaultLoader'
 import { usePersonaVaultSaver } from '@/hooks/usePersonaVaultSaver'
+import { useRagApi } from '@/hooks/useRagApi'
 import LaunchPage from '@/components/launch/LaunchPage'
 import MainLayout from '@/components/layout/MainLayout'
 import LoadingOverlay from '@/components/layout/LoadingOverlay'
@@ -10,6 +11,7 @@ export default function App() {
   const { appState, theme, panelOpacity, setAppState } = useUIStore()
   const { vaultPath, loadVault } = useVaultLoader()
   usePersonaVaultSaver()
+  useRagApi()
   const vaultLoaded = useRef(false)
 
   // Apply theme to document root

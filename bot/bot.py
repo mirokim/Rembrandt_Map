@@ -226,6 +226,7 @@ class SlackBotRunner:
 
         from modules.persona_config import resolve_persona
         from modules.rag_simple import search_vault, build_rag_context
+        from modules.rag_electron import search_via_electron
 
         cfg = self.cfg
         bot_token  = cfg.get("slack_bot_token", "").strip()
@@ -277,7 +278,13 @@ class SlackBotRunner:
 
             thinking = say(text=f"{emoji} *{name}* 답변 준비 중...", thread_ts=thread_ts)
 
-            results     = search_vault(query, vault_path, top_n=top_n)
+            # Electron RAG 우선, 미실행 시 단순 키워드 검색 폴백
+            results = search_via_electron(query, top_n=top_n)
+            if results is None:
+                results = search_vault(query, vault_path, top_n=top_n)
+                self._log(f"[RAG] fallback → simple search ({len(results)}건)")
+            else:
+                self._log(f"[RAG] Electron TF-IDF ({len(results)}건)")
             rag_context = build_rag_context(results, max_chars=6000)
 
             if claude:

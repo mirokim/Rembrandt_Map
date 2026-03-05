@@ -2,6 +2,17 @@
 
 import type { VaultFile, BackendChunk, SearchResult } from '@/types'
 
+export interface RagDocResult {
+  doc_id: string
+  filename: string
+  stem: string
+  title: string
+  date: string
+  tags: string[]
+  body: string
+  score: number
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -38,6 +49,12 @@ declare global {
       findImageByName?(filename: string): Promise<string | null>
       createFolder(folderPath: string): Promise<{ success: boolean; path: string }>
       moveFile(absolutePath: string, destFolderPath: string): Promise<{ success: boolean; newPath: string }>
+    }
+
+    // ── ragAPI (Slack RAG bridge) ─────────────────────────────────────────────
+    ragAPI?: {
+      onSearch(callback: (data: { requestId: string; query: string; topN: number }) => void): () => void
+      sendResult(requestId: string, results: RagDocResult[]): void
     }
 
     // ── backendAPI (Phase 1-3) ────────────────────────────────────────────────

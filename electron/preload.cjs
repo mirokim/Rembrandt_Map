@@ -140,3 +140,17 @@ contextBridge.exposeInMainWorld('backendAPI', {
     return () => ipcRenderer.removeListener('backend:ready', listener)
   },
 })
+
+// ── ragAPI (Slack RAG bridge) ─────────────────────────────────────────────────
+contextBridge.exposeInMainWorld('ragAPI', {
+  /** Listen for search requests from the HTTP server (via main process). */
+  onSearch: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('rag:search', listener)
+    return () => ipcRenderer.removeListener('rag:search', listener)
+  },
+  /** Send search results back to the HTTP server (via main process). */
+  sendResult: (requestId, results) => {
+    ipcRenderer.send('rag:result', { requestId, results })
+  },
+})
