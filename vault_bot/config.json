@@ -1,0 +1,9 @@
+{
+  "vault_path": "",
+  "claude_api_key": "",
+  "interval_hours": 1,
+  "auto_run": false,
+  "keyword_index_path": ".rembrandt/keyword_index.json",
+  "max_files_per_keyword_scan": 20,
+  "worker_model": "claude-haiku-4-5-20251001"
+}
