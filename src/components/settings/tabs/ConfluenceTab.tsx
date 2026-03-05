@@ -106,6 +106,29 @@ const ARCHIVE_CRITERIA = `
 해당 없으면 아카이브 언급 불필요.
 `.trim()
 
+async function extractKeywords(pages: VaultPage[], apiKey: string): Promise<string[]> {
+  const sample = pages.slice(0, 12)
+    .map(p => `[${p.filename}]\n${p.content.slice(0, 500)}`)
+    .join('\n\n---\n\n')
+  const sysPrompt = [
+    '아래 문서들에서 반복되거나 핵심적인 도메인 키워드를 추출하세요.',
+    '기술 용어, 시스템명, 기능명, 프로젝트명 위주 20개 이내.',
+    'JSON 배열로만 출력: ["키워드1", "키워드2", ...]',
+  ].join('\n')
+  let result = ''
+  try {
+    await streamCompletion(apiKey, HAIKU_MODEL, sysPrompt,
+      [{ role: 'user', content: `문서 샘플:\n\n${sample}` }],
+      (chunk: string) => { result += chunk })
+    const m = result.match(/\[[\s\S]*?\]/)
+    if (m) {
+      const parsed = JSON.parse(m[0])
+      if (Array.isArray(parsed)) return parsed.filter(k => typeof k === 'string').slice(0, 30)
+    }
+  } catch { /* ignore */ }
+  return []
+}
+
 async function fixFileWithClaude(
   content: string,
   issues: string,
@@ -249,7 +272,7 @@ export default function ConfluenceTab() {
   const [urlInput, setUrlInput] = useState('')
   const [urlError, setUrlError] = useState('')
   const [skipImages, setSkipImages] = useState(false)
-  const [resultTab, setResultTab] = useState<'files' | 'review'>('files')
+  const [resultTab, setResultTab] = useState<'files' | 'review' | 'keywords'>('files')
   // Rollback tracking
   const [savedFilePaths, setSavedFilePaths] = useState<string[]>([])
   const [savedDirs, setSavedDirs] = useState<string[]>([])
@@ -263,6 +286,8 @@ export default function ConfluenceTab() {
   const [fixedFiles, setFixedFiles] = useState<{ filename: string; ok: boolean }[]>([])
   const [archiveMoveStatus, setArchiveMoveStatus] = useState<'idle' | 'running' | 'done'>('idle')
   const [movedToArchive, setMovedToArchive] = useState(0)
+  const [extractedKeywords, setExtractedKeywords] = useState<string[]>([])
+  const [keywordSaveStatus, setKeywordSaveStatus] = useState<'idle' | 'saving' | 'done'>('idle')
 
   const addLog = (msg: string) => setLog(prev => [...prev, msg])
 
@@ -298,6 +323,8 @@ export default function ConfluenceTab() {
     setFixedFiles([])
     setArchiveMoveStatus('idle')
     setMovedToArchive(0)
+    setExtractedKeywords([])
+    setKeywordSaveStatus('idle')
 
     const stamp = getDateStamp()
     const targetFolder = `active_${stamp}`  // e.g. active_20260304
@@ -336,11 +363,19 @@ export default function ConfluenceTab() {
       // ── 2. Convert HTML → Markdown ───────────────────────────────────────────
       setStatus('converting')
       addLog('🔄 마크다운 변환 중…')
-      // Build title→stem map so ac:link wikilinks resolve correctly
       const titleStemMap = new Map<string, string>(pages.map(p => [p.title, toStem(p.title, p.id)]))
       const pagesWithUrl = pages.map(p => ({ ...p, _baseUrl: cfg.baseUrl }))
-      const converted: VaultPage[] = pagesWithUrl.map(p => pageToVaultMarkdown(p, titleStemMap))
-      addLog(`✅ ${converted.length}개 파일 변환 완료`)
+      const converted: VaultPage[] = []
+      let stubCount = 0
+      for (const page of pagesWithUrl) {
+        const vp = pageToVaultMarkdown(page, titleStemMap)
+        converted.push(vp)
+        const sizeKb = Math.round(new TextEncoder().encode(vp.content).length / 102.4) / 10
+        const isStub = getBodyLength(vp.content) < 600
+        if (isStub) stubCount++
+        addLog(`   ${isStub ? '⚠' : '✓'} ${vp.filename}  (${sizeKb}K${isStub ? ' — 스텁' : ''})`)
+      }
+      addLog(`✅ 변환 완료: ${converted.length}개 (스텁 ${stubCount}개 포함)`)
       if (cancelledRef.current) { addLog('⏹ 중지됨'); setStatus('error'); return }
 
       // Record converted file metadata for display
@@ -442,8 +477,15 @@ export default function ConfluenceTab() {
         const problemCount = validIssues.filter(r => !r.issues.startsWith('✅')).length
         const archiveCount = validIssues.filter(r => r.archive).length
         addLog(`✅ 검수 완료 — 문제: ${problemCount}개, 아카이브 권장: ${archiveCount}개 / 총 ${validIssues.length}개`)
+
+        // ── 7. Keyword extraction ──────────────────────────────────────────
+        addLog('🏷 핵심 키워드 추출 중…')
+        const kws = await extractKeywords(converted, apiKey)
+        setExtractedKeywords(kws)
+        addLog(`✅ ${kws.length}개 키워드 추출 완료`)
+        if (kws.length > 0) setResultTab('keywords')
       } else {
-        addLog('⏭ Anthropic API 키 없음 → 품질 검수 건너뜀')
+        addLog('⏭ Anthropic API 키 없음 → 품질 검수 / 키워드 추출 건너뜀')
       }
 
       addLog('🎉 가져오기 완료! 볼트를 다시 로드하면 반영됩니다.')
@@ -494,6 +536,34 @@ export default function ConfluenceTab() {
     }
     setFixedFiles(results)
     setAutoFixStatus('done')
+  }
+
+  const handleSaveKeywords = async () => {
+    if (!vaultPath || extractedKeywords.length === 0) return
+    setKeywordSaveStatus('saving')
+    const vaultAPI = (window as any).vaultAPI as { saveFile: (p: string, c: string) => Promise<void> }
+    const date = new Date().toISOString().slice(0, 10)
+    const lines = [
+      '---',
+      'title: 도메인 키워드 사전',
+      `date: ${date}`,
+      'type: reference',
+      'status: active',
+      'tags: [키워드, 도메인]',
+      '---',
+      '',
+      '# 핵심 도메인 키워드',
+      '',
+      '> Confluence import 자동 추출 — 수동으로 추가/편집 가능',
+      '',
+      ...extractedKeywords.map(k => `- ${k}`),
+    ]
+    try {
+      await vaultAPI.saveFile(vaultPath + '/keywords.md', lines.join('\n'))
+      setKeywordSaveStatus('done')
+    } catch {
+      setKeywordSaveStatus('idle')
+    }
   }
 
   const handleMoveToArchive = async () => {
@@ -870,23 +940,25 @@ export default function ConfluenceTab() {
           </div>
         )}
 
-        {/* Results panel — converted files + Claude review */}
-        {(convertedFiles.length > 0 || reviews.length > 0) && (
+        {/* Results panel — converted files + Claude review + keywords */}
+        {(convertedFiles.length > 0 || reviews.length > 0 || extractedKeywords.length > 0) && (
           <div className="mt-4">
             {/* Tab bar */}
             <div className="flex gap-0 mb-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
               {([
-                { id: 'files',  label: `전환된 파일 (${convertedFiles.length})` },
-                { id: 'review', label: reviews.length > 0
+                { id: 'files',    label: `변환 로그 (${convertedFiles.length})` },
+                { id: 'review',   label: reviews.length > 0
                   ? (() => {
                       const problems = reviews.filter(r => !r.issues.startsWith('✅') && !r.archive).length
                       const archives = reviews.filter(r => r.archive).length
                       const parts = []
                       if (problems > 0) parts.push(`${problems}개 문제`)
-                      if (archives > 0) parts.push(`🗄 ${archives}개 아카이브`)
+                      if (archives > 0) parts.push(`🗄 ${archives}개`)
                       return `검수 결과 (${parts.join(', ') || '이상 없음'})`
                     })()
                   : '검수 결과 (대기)' },
+                { id: 'keywords', label: extractedKeywords.length > 0
+                  ? `🏷 키워드 (${extractedKeywords.length})` : '🏷 키워드' },
               ] as const).map(tab => (
                 <button
                   key={tab.id}
@@ -1047,6 +1119,51 @@ export default function ConfluenceTab() {
                         </div>
                       )
                     })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Keywords tab */}
+            {resultTab === 'keywords' && (
+              <div style={{ border: '1px solid var(--color-border)', borderTop: 'none', borderRadius: '0 0 4px 4px' }}>
+                {/* Toolbar */}
+                <div className="flex items-center gap-3 px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-base)' }}>
+                  {extractedKeywords.length > 0 && vaultPath && (
+                    <button
+                      onClick={handleSaveKeywords}
+                      disabled={keywordSaveStatus === 'saving' || keywordSaveStatus === 'done'}
+                      className="text-[11px] px-3 py-1 rounded font-medium disabled:opacity-40"
+                      style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', whiteSpace: 'nowrap' }}
+                    >
+                      {keywordSaveStatus === 'saving' ? '저장 중…'
+                        : keywordSaveStatus === 'done' ? '✅ keywords.md 저장됨'
+                        : '💾 vault/keywords.md 저장'}
+                    </button>
+                  )}
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                    수동으로 편집하거나 태그를 추가할 수 있습니다
+                  </span>
+                </div>
+
+                {/* Keyword chips */}
+                <div className="overflow-y-auto px-3 py-3" style={{ maxHeight: 200, background: 'var(--color-bg-surface)' }}>
+                  {extractedKeywords.length === 0 ? (
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                      {status === 'reviewing' ? '키워드 추출 중…' : '키워드 없음 (검수 완료 후 자동 추출)'}
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {extractedKeywords.map((kw, i) => (
+                        <span
+                          key={i}
+                          className="text-[11px] px-2 py-0.5 rounded-full font-medium"
+                          style={{ background: 'var(--color-accent)22', color: 'var(--color-accent)', border: '1px solid var(--color-accent)44' }}
+                        >
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
