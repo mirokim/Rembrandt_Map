@@ -2,7 +2,6 @@
 wikilink_updater.py — keyword_index.json 기반 wikilink 주입 + 클러스터 링크 강화
 inject_keywords.py + enhance_wikilinks.py 로직을 통합
 """
-import os
 import re
 from pathlib import Path
 
@@ -44,7 +43,10 @@ def inject_keywords(text: str, keyword_map: dict) -> tuple[str, list[str]]:
         pat = re.compile(re.escape(keyword))
         for m in pat.finditer(masked):
             link = f"[[{hub_stem}|{display}]]"
-            masked = masked[:m.start()] + link + masked[m.end():]
+            # 주입 후 새 링크도 즉시 마스킹하여 이후 키워드가 오염시키지 못하게 방지
+            placeholder = f"\x00WL{len(saved)}\x00"
+            saved.append(link)
+            masked = masked[:m.start()] + placeholder + masked[m.end():]
             injected.append(keyword)
             break
 

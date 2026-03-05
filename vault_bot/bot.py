@@ -25,7 +25,7 @@ from pathlib import Path
 # 모듈 경로 추가
 sys.path.insert(0, str(Path(__file__).parent))
 
-from modules.vault_scanner import scan_vault, find_active_folders, VaultDoc
+from modules.vault_scanner import scan_vault, find_active_folders
 from modules.keyword_store import KeywordStore
 from modules.claude_client import ClaudeClient
 from modules.wikilink_updater import process_folder
@@ -66,10 +66,14 @@ def save_config(cfg: dict):
 class VaultBot:
     def __init__(self, cfg: dict, log_fn, on_done_fn):
         self.cfg = cfg
-        self.log = log_fn
+        self._log_fn = log_fn      # must be called via after() — not directly from threads
         self.on_done = on_done_fn
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def log(self, msg: str):
+        """Thread-safe log: schedules the call on the Tk main thread."""
+        self._log_fn(msg)          # _log_fn is App._log_threadsafe which uses after()
 
     def _run_cycle(self):
         cfg = self.cfg
@@ -161,7 +165,14 @@ class VaultBot:
         self.on_done()
 
     def run_once(self):
-        t = threading.Thread(target=self._run_cycle, daemon=True)
+        def _safe():
+            try:
+                self._run_cycle()
+            except Exception as e:
+                self.log(f"❌ 치명적 오류: {e}")
+            finally:
+                self.on_done()
+        t = threading.Thread(target=_safe, daemon=True)
         t.start()
 
     def start_timer(self, interval_hours: float):
@@ -169,7 +180,12 @@ class VaultBot:
 
         def loop():
             while not self._stop.is_set():
-                self._run_cycle()
+                try:
+                    self._run_cycle()
+                except Exception as e:
+                    self.log(f"❌ 치명적 오류: {e}")
+                finally:
+                    self.on_done()
                 # interval 대기 (10초마다 stop 체크)
                 end_time = time.time() + interval_hours * 3600
                 while time.time() < end_time and not self._stop.is_set():
@@ -316,12 +332,21 @@ class App(tk.Tk):
 
     # ── 로그 ─────────────────────────────────────────────────────────────────
 
-    def _log(self, msg: str):
+    def _log_threadsafe(self, msg: str):
+        """백그라운드 스레드에서 안전하게 호출 가능 — after()로 메인 스레드에 위임."""
+        self.after(0, lambda m=msg: self._log_direct(m))
+
+    def _log_direct(self, msg: str):
+        """메인 스레드 전용. Tkinter 위젯 직접 수정."""
         self.txt_log.configure(state="normal")
         ts = datetime.now().strftime("%H:%M:%S")
         self.txt_log.insert("end", f"[{ts}] {msg}\n")
         self.txt_log.see("end")
         self.txt_log.configure(state="disabled")
+
+    def _log(self, msg: str):
+        """메인 스레드에서 호출 (버튼 클릭, 설정 저장 등)."""
+        self._log_direct(msg)
 
     def _clear_log(self):
         self.txt_log.configure(state="normal")
@@ -332,7 +357,7 @@ class App(tk.Tk):
 
     def _make_bot(self) -> VaultBot:
         self._save_cfg()
-        return VaultBot(self.cfg, log_fn=self._log, on_done_fn=self._on_cycle_done)
+        return VaultBot(self.cfg, log_fn=self._log_threadsafe, on_done_fn=self._on_cycle_done)
 
     def _set_running(self, running: bool):
         self.lbl_status.config(
@@ -347,11 +372,14 @@ class App(tk.Tk):
         bot.run_once()
 
     def _on_cycle_done(self):
-        self.after(0, lambda: self._set_running(False))
-        self.after(0, self._refresh_keywords)
-        if self.timer_running and self.cfg["interval_hours"] > 0:
-            h = self.cfg["interval_hours"]
-            self._next_run_time = datetime.now() + timedelta(hours=h)
+        """백그라운드 스레드에서 호출됨 — 모든 UI 조작을 after()로 위임."""
+        def _main():
+            self._set_running(False)
+            self._refresh_keywords()
+            if self.timer_running and self.cfg["interval_hours"] > 0:
+                h = self.cfg["interval_hours"]
+                self._next_run_time = datetime.now() + timedelta(hours=h)
+        self.after(0, _main)
 
     def _toggle_timer(self):
         if self.timer_running:

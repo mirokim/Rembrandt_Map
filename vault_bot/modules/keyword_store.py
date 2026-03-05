@@ -2,7 +2,6 @@
 keyword_store.py — keyword_index.json CRUD
 """
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
