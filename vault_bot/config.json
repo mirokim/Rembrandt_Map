@@ -5,5 +5,9 @@
   "auto_run": false,
   "keyword_index_path": ".rembrandt/keyword_index.json",
   "max_files_per_keyword_scan": 20,
-  "worker_model": "claude-haiku-4-5-20251001"
+  "worker_model": "claude-haiku-4-5-20251001",
+  "slack_bot_token": "",
+  "slack_app_token": "",
+  "slack_model": "claude-sonnet-4-6",
+  "slack_rag_top_n": 5
 }

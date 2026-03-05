@@ -199,6 +199,150 @@ class VaultBot:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Slack Bot Runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+# slack_bot/ 폴더의 모듈 경로 추가 (vault_scanner 공유)
+_SLACK_BOT_DIR = Path(__file__).parent.parent / "slack_bot"
+if _SLACK_BOT_DIR.exists() and str(_SLACK_BOT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SLACK_BOT_DIR))
+
+
+class SlackBotRunner:
+    """Slack SocketModeHandler를 백그라운드 스레드로 관리."""
+
+    def __init__(self, cfg: dict, log_fn, on_status_fn):
+        self.cfg = cfg
+        self._log = log_fn          # thread-safe (after() 기반)
+        self._on_status = on_status_fn
+        self._handler = None
+        self._thread: threading.Thread | None = None
+
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> bool:
+        """슬랙 봇 시작. 성공 시 True."""
+        try:
+            from slack_bolt import App
+            from slack_bolt.adapter.socket_mode import SocketModeHandler
+            from slack_sdk import WebClient
+        except ImportError:
+            self._log("❌ slack-bolt 패키지 필요: pip install slack-bolt")
+            return False
+
+        if not _SLACK_BOT_DIR.exists():
+            self._log("❌ slack_bot/ 폴더가 없습니다.")
+            return False
+
+        try:
+            from modules.persona_config import resolve_persona
+            from modules.rag_simple import search_vault, build_rag_context
+        except ImportError as e:
+            self._log(f"❌ slack_bot 모듈 로드 실패: {e}")
+            return False
+
+        cfg = self.cfg
+        bot_token  = cfg.get("slack_bot_token", "").strip()
+        app_token  = cfg.get("slack_app_token", "").strip()
+        vault_path = cfg.get("vault_path", "").strip()
+        api_key    = cfg.get("claude_api_key", "").strip()
+        model      = cfg.get("slack_model", "claude-sonnet-4-6")
+        top_n      = cfg.get("slack_rag_top_n", 5)
+
+        if not bot_token or not app_token:
+            self._log("❌ slack_bot_token / slack_app_token 이 설정에 없습니다.")
+            return False
+        if not vault_path or not Path(vault_path).exists():
+            self._log(f"❌ 볼트 경로 없음: {vault_path!r}")
+            return False
+
+        claude = ClaudeClient(api_key, model) if api_key else None
+        web    = WebClient(token=bot_token)
+        app    = App(token=bot_token)
+        import re as _re
+
+        PERSONA_TAG_RE = _re.compile(r"\[([^\]]+)\]")
+        BOT_MENTION_RE = _re.compile(r"<@[A-Z0-9]+>")
+
+        def parse_msg(text: str):
+            text = BOT_MENTION_RE.sub("", text).strip()
+            tag = "chief"
+            m = PERSONA_TAG_RE.search(text)
+            if m:
+                tag = m.group(1).strip()
+                text = text[:m.start()] + text[m.end():]
+            return tag, text.strip()
+
+        @app.event("app_mention")
+        def handle_mention(event, say, logger):
+            text      = event.get("text", "")
+            thread_ts = event.get("thread_ts") or event.get("ts")
+            channel   = event["channel"]
+
+            tag, query = parse_msg(text)
+            if not query:
+                say(text="무엇을 도와드릴까요?", thread_ts=thread_ts)
+                return
+
+            persona = resolve_persona(tag)
+            emoji   = persona.get("emoji", "🤖")
+            name    = persona.get("name", tag)
+            self._log(f"[Slack] {name}: {query[:60]}")
+
+            thinking = say(text=f"{emoji} *{name}* 답변 준비 중...", thread_ts=thread_ts)
+
+            results     = search_vault(query, vault_path, top_n=top_n)
+            rag_context = build_rag_context(results, max_chars=6000)
+
+            if claude:
+                system = persona["system"] + (f"\n\n{rag_context}" if rag_context else "")
+                try:
+                    answer = claude.complete(system, query, max_tokens=1500)
+                except Exception as e:
+                    answer = f"❌ Claude 오류: {e}"
+            elif rag_context:
+                answer = f"_(API 키 없음)_\n\n{rag_context}"
+            else:
+                answer = "관련 문서를 찾지 못했습니다."
+
+            sources = ""
+            if results:
+                lines = [f"• `{r['stem']}` ({r['date']})" for r in results[:3]]
+                sources = "\n\n📂 *참고 문서*\n" + "\n".join(lines)
+
+            final = f"{emoji} *{name}*\n\n{answer}{sources}"
+            try:
+                web.chat_update(channel=channel, ts=thinking["ts"], text=final)
+            except Exception:
+                say(text=final, thread_ts=thread_ts)
+
+        self._handler = SocketModeHandler(app, app_token)
+
+        def _run():
+            try:
+                self._handler.start()
+            except Exception as e:
+                self._log(f"❌ Slack 봇 종료: {e}")
+            finally:
+                self._on_status(False)
+
+        self._thread = threading.Thread(target=_run, daemon=True)
+        self._thread.start()
+        self._log(f"🟢 Slack 봇 시작 — 모델: {model}")
+        return True
+
+    def stop(self):
+        if self._handler:
+            try:
+                self._handler.close()
+            except Exception:
+                pass
+        self._handler = None
+        self._log("🔴 Slack 봇 중지")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tkinter GUI
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -212,6 +356,7 @@ class App(tk.Tk):
         self.bot: VaultBot | None = None
         self.timer_running = False
         self._next_run_time: datetime | None = None
+        self._slack_runner: SlackBotRunner | None = None
         self._build_ui()
         self._load_cfg_to_ui()
         self._tick()  # 타이머 카운트다운 업데이트
@@ -311,17 +456,75 @@ class App(tk.Tk):
         self.kw_menu.add_command(label="삭제", command=self._delete_keyword)
         self.kw_tree.bind("<Button-3>", self._show_kw_menu)
 
+        # ── Slack 봇 탭 ──────────────────────────────────────────────────────
+        tab_slack = ttk.Frame(self.notebook)
+        self.notebook.add(tab_slack, text="💬 Slack 봇")
+
+        # 설정 영역
+        slack_cfg = ttk.LabelFrame(tab_slack, text="Slack 설정", padding=8)
+        slack_cfg.pack(fill="x", padx=8, pady=(8, 4))
+
+        def slack_row(row, label, var, show=""):
+            ttk.Label(slack_cfg, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)
+            e = ttk.Entry(slack_cfg, textvariable=var, show=show, width=50)
+            e.grid(row=row, column=1, sticky="ew", padx=4)
+
+        self.var_slack_bot_token = tk.StringVar()
+        self.var_slack_app_token = tk.StringVar()
+        self.var_slack_model     = tk.StringVar()
+        self.var_slack_top_n     = tk.IntVar(value=5)
+
+        slack_row(0, "Bot Token (xoxb-...):  ", self.var_slack_bot_token, show="*")
+        slack_row(1, "App Token (xapp-...):  ", self.var_slack_app_token, show="*")
+        slack_row(2, "모델:                  ", self.var_slack_model)
+
+        ttk.Label(slack_cfg, text="RAG top-N:").grid(row=3, column=0, sticky="w", padx=6, pady=3)
+        ttk.Spinbox(slack_cfg, textvariable=self.var_slack_top_n,
+                    from_=1, to=20, width=5).grid(row=3, column=1, sticky="w", padx=4)
+        slack_cfg.columnconfigure(1, weight=1)
+
+        # 저장 버튼
+        ttk.Button(slack_cfg, text="저장", command=self._save_cfg, width=6).grid(
+            row=3, column=1, sticky="e", padx=4)
+
+        # 제어 영역
+        slack_ctrl = ttk.Frame(tab_slack)
+        slack_ctrl.pack(fill="x", padx=8, pady=4)
+
+        self.btn_slack = ttk.Button(slack_ctrl, text="▶ Slack 봇 시작",
+                                     command=self._toggle_slack, width=16)
+        self.btn_slack.pack(side="left", padx=4)
+
+        self.lbl_slack_status = ttk.Label(slack_ctrl, text="상태: 중지", foreground="gray")
+        self.lbl_slack_status.pack(side="left", padx=10)
+
+        # Slack 전용 로그
+        self.txt_slack_log = scrolledtext.ScrolledText(
+            tab_slack, wrap="word", state="disabled",
+            font=("Consolas", 9), bg="#0d1117", fg="#7ee787", height=16)
+        self.txt_slack_log.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+        ttk.Button(tab_slack, text="로그 지우기",
+                   command=self._clear_slack_log).pack(anchor="e", padx=8, pady=2)
+
     # ── Config UI 연결 ────────────────────────────────────────────────────────
 
     def _load_cfg_to_ui(self):
         self.var_vault.set(self.cfg.get("vault_path", ""))
         self.var_key.set(self.cfg.get("claude_api_key", ""))
         self.var_interval.set(self.cfg.get("interval_hours", 1))
+        self.var_slack_bot_token.set(self.cfg.get("slack_bot_token", ""))
+        self.var_slack_app_token.set(self.cfg.get("slack_app_token", ""))
+        self.var_slack_model.set(self.cfg.get("slack_model", "claude-sonnet-4-6"))
+        self.var_slack_top_n.set(self.cfg.get("slack_rag_top_n", 5))
 
     def _save_cfg(self):
-        self.cfg["vault_path"] = self.var_vault.get().strip()
-        self.cfg["claude_api_key"] = self.var_key.get().strip()
-        self.cfg["interval_hours"] = self.var_interval.get()
+        self.cfg["vault_path"]       = self.var_vault.get().strip()
+        self.cfg["claude_api_key"]   = self.var_key.get().strip()
+        self.cfg["interval_hours"]   = self.var_interval.get()
+        self.cfg["slack_bot_token"]  = self.var_slack_bot_token.get().strip()
+        self.cfg["slack_app_token"]  = self.var_slack_app_token.get().strip()
+        self.cfg["slack_model"]      = self.var_slack_model.get().strip()
+        self.cfg["slack_rag_top_n"]  = self.var_slack_top_n.get()
         save_config(self.cfg)
         self._log("💾 설정 저장됨")
 
@@ -504,6 +707,54 @@ class App(tk.Tk):
         ttk.Button(btn_frm, text="추가", command=on_ok, width=10).pack(side="left", padx=4)
         ttk.Button(btn_frm, text="취소", command=dialog.destroy, width=10).pack(side="left", padx=4)
         frm.columnconfigure(1, weight=1)
+
+    # ── Slack 탭 ─────────────────────────────────────────────────────────────
+
+    def _slack_log(self, msg: str):
+        """메인 스레드 전용 — Slack 로그 위젯에 직접 출력."""
+        self.txt_slack_log.configure(state="normal")
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.txt_slack_log.insert("end", f"[{ts}] {msg}\n")
+        self.txt_slack_log.see("end")
+        self.txt_slack_log.configure(state="disabled")
+
+    def _slack_log_threadsafe(self, msg: str):
+        """백그라운드 스레드에서 호출 — after()로 위임."""
+        self.after(0, lambda m=msg: self._slack_log(m))
+
+    def _clear_slack_log(self):
+        self.txt_slack_log.configure(state="normal")
+        self.txt_slack_log.delete("1.0", "end")
+        self.txt_slack_log.configure(state="disabled")
+
+    def _set_slack_status(self, running: bool):
+        if running:
+            self.btn_slack.config(text="⏹ Slack 봇 중지")
+            self.lbl_slack_status.config(text="상태: 실행 중", foreground="green")
+        else:
+            self.btn_slack.config(text="▶ Slack 봇 시작")
+            self.lbl_slack_status.config(text="상태: 중지", foreground="gray")
+
+    def _on_slack_stopped(self, running: bool):
+        """SlackBotRunner가 종료 시 호출 (백그라운드 스레드에서)."""
+        self.after(0, lambda: self._set_slack_status(running))
+
+    def _toggle_slack(self):
+        if self._slack_runner and self._slack_runner.is_running():
+            self._slack_runner.stop()
+            self._slack_runner = None
+            self._set_slack_status(False)
+        else:
+            self._save_cfg()
+            runner = SlackBotRunner(
+                self.cfg,
+                log_fn=self._slack_log_threadsafe,
+                on_status_fn=self._on_slack_stopped,
+            )
+            ok = runner.start()
+            if ok:
+                self._slack_runner = runner
+                self._set_slack_status(True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
