@@ -1,14 +1,20 @@
 """
 rag_simple.py — Slack 봇용 간단 키워드 RAG
-TF-IDF 없이 키워드 substring 매칭으로 상위 문서 추출
+vault_scanner는 vault_bot/modules/ 에서 공유
 """
 import re
+import sys
 from pathlib import Path
-from .vault_scanner import scan_vault, find_active_folders, VaultDoc
+
+# vault_bot/modules/vault_scanner 공유 참조
+_VAULT_BOT = Path(__file__).parent.parent.parent / "vault_bot"
+if str(_VAULT_BOT) not in sys.path:
+    sys.path.insert(0, str(_VAULT_BOT))
+
+from modules.vault_scanner import scan_vault, find_active_folders, VaultDoc
 
 
 def _tokenize(text: str) -> list[str]:
-    """공백/특수문자로 분리, 2자 이상 토큰만"""
     tokens = re.split(r"[\s\[\](),./|_\-]+", text.lower())
     return [t for t in tokens if len(t) >= 2]
 
@@ -25,7 +31,7 @@ def _score_doc(doc: VaultDoc, query_tokens: list[str]) -> float:
             score += 2.0
         count = body_lower.count(token)
         if count > 0:
-            score += min(count * 0.5, 3.0)  # body 히트는 최대 3점
+            score += min(count * 0.5, 3.0)
     return score
 
 
@@ -35,10 +41,6 @@ def search_vault(
     top_n: int = 5,
     active_only: bool = True,
 ) -> list[dict]:
-    """
-    볼트에서 query와 관련된 상위 top_n 문서 반환.
-    returns: [{"title": ..., "stem": ..., "body": ..., "score": ...}]
-    """
     query_tokens = _tokenize(query)
     if not query_tokens:
         return []
@@ -53,7 +55,6 @@ def search_vault(
             if str(Path(d.path).parent.resolve()) in active_set
         ]
 
-    # 스코어링
     scored = []
     for doc in docs:
         if doc.stem.startswith("index_"):
@@ -66,12 +67,10 @@ def search_vault(
 
     results = []
     for score, doc in scored[:top_n]:
-        # 본문은 최대 2000자로 자름
-        body_snippet = doc.body.strip()[:2000]
         results.append({
             "title": doc.title,
             "stem": doc.stem,
-            "body": body_snippet,
+            "body": doc.body.strip()[:2000],
             "score": score,
             "date": doc.date_str,
             "tags": doc.tags,
@@ -80,7 +79,6 @@ def search_vault(
 
 
 def build_rag_context(results: list[dict], max_chars: int = 8000) -> str:
-    """검색 결과를 LLM context 문자열로 변환"""
     if not results:
         return ""
 
@@ -90,14 +88,11 @@ def build_rag_context(results: list[dict], max_chars: int = 8000) -> str:
         tag_str = " ".join(f"`{t}`" for t in (r["tags"] or []))
         header = f"### {r['title']} ({r['date']}) {tag_str}\n"
         body = r["body"]
-
-        # 남은 예산에 맞춰 잘라냄
         available = max_chars - total - len(header) - 10
         if available <= 100:
             break
         if len(body) > available:
             body = body[:available] + "…"
-
         chunk = header + body + "\n\n"
         parts.append(chunk)
         total += len(chunk)

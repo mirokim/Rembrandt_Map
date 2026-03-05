@@ -1,0 +1,9 @@
+{
+  "vault_path": "",
+  "claude_api_key": "",
+  "slack_bot_token": "",
+  "slack_app_token": "",
+  "slack_model": "claude-sonnet-4-6",
+  "slack_rag_top_n": 5,
+  "personas": {}
+}

@@ -43,7 +43,6 @@ DEFAULT_PERSONAS: dict[str, dict] = {
     },
 }
 
-# 페르소나 태그 파싱용 별칭
 PERSONA_ALIASES: dict[str, str] = {
     "chief": "chief",
     "수석": "chief",
@@ -58,10 +57,6 @@ PERSONA_ALIASES: dict[str, str] = {
 
 
 def resolve_persona(tag: str, custom_personas: dict | None = None) -> dict:
-    """
-    태그 문자열로 페르소나 dict 반환.
-    custom_personas가 있으면 DEFAULT_PERSONAS에 머지.
-    """
     all_personas = {**DEFAULT_PERSONAS, **(custom_personas or {})}
     key = PERSONA_ALIASES.get(tag.lower(), tag.lower())
     return all_personas.get(key, all_personas["chief"])
