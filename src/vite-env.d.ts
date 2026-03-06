@@ -55,6 +55,7 @@ declare global {
     ragAPI?: {
       onSearch(callback: (data: { requestId: string; query: string; topN: number }) => void): () => void
       onGetSettings(callback: (data: { requestId: string }) => void): () => void
+      onAsk(callback: (data: { requestId: string; query: string; directorId: string; history?: { role: 'user' | 'assistant'; content: string }[]; images?: { data: string; mediaType: string }[] }) => void): () => void
       sendResult(requestId: string, results: unknown): void
     }
 

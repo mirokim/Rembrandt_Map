@@ -892,7 +892,11 @@ function startRagApiServer() {
     return new Promise((resolve) => {
       if (!mainWindow) { resolve(null); return }
       const requestId = `${Date.now()}-${Math.random()}`
-      const timer = setTimeout(() => { _ragResolvers.delete(requestId); resolve(null) }, timeoutMs)
+      const timer = setTimeout(() => {
+        _ragResolvers.delete(requestId)
+        console.warn(`[RAG] IPC timeout after ${timeoutMs}ms for ${ipcChannel}`)
+        resolve(null)
+      }, timeoutMs)
       _ragResolvers.set(requestId, (data) => { clearTimeout(timer); _ragResolvers.delete(requestId); resolve(data) })
       mainWindow.webContents.send(ipcChannel, { requestId, ...payload })
     })
@@ -916,6 +920,29 @@ function startRagApiServer() {
       if (!query.trim()) return send(400, { error: 'query required' })
       const results = await ipcRequest('rag:search', { query, topN }, 15000)
       return results ? send(200, results) : send(504, { error: 'timeout' })
+    }
+
+    if (url.pathname === '/ask') {
+      // POST body 파싱 (history 포함 가능), GET 파라미터 폴백
+      let body = {}
+      if (req.method === 'POST') {
+        const raw = await new Promise((resolve, reject) => {
+          let buf = ''
+          req.on('data', chunk => { buf += chunk })
+          req.on('end', () => resolve(buf))
+          req.on('error', reject)
+        })
+        try { body = JSON.parse(raw) } catch { /* ignore malformed */ }
+      }
+      const query      = body.q      || url.searchParams.get('q')      || ''
+      const directorId = body.director || url.searchParams.get('director') || 'chief_director'
+      const history    = Array.isArray(body.history) ? body.history : []
+      const images     = Array.isArray(body.images)  ? body.images  : []
+      if (!query.trim()) return send(400, { error: 'query required' })
+      // 90초 타임아웃 — 이미지 포함 시 Vision + RAG + LLM 스트리밍 대기
+      const timeoutMs  = images.length > 0 ? 90000 : 60000
+      const result = await ipcRequest('rag:ask', { query, directorId, history, images }, timeoutMs)
+      return result ? send(200, result) : send(504, { error: 'timeout' })
     }
 
     send(404, { error: 'not found' })

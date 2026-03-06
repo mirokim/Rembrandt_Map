@@ -1,3 +1,4 @@
 PyYAML>=6.0
 slack-bolt>=1.18
 slack-sdk>=3.26
+Pillow>=10.0

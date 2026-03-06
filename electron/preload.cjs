@@ -155,6 +155,12 @@ contextBridge.exposeInMainWorld('ragAPI', {
     ipcRenderer.on('rag:get-settings', listener)
     return () => ipcRenderer.removeListener('rag:get-settings', listener)
   },
+  /** Listen for full-answer generation requests (Slack /ask endpoint). */
+  onAsk: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('rag:ask', listener)
+    return () => ipcRenderer.removeListener('rag:ask', listener)
+  },
   /** Send results/settings back to the HTTP server (via main process). */
   sendResult: (requestId, results) => {
     ipcRenderer.send('rag:result', { requestId, results })

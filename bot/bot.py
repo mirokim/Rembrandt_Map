@@ -226,7 +226,8 @@ class SlackBotRunner:
 
         from modules.persona_config import resolve_persona
         from modules.rag_simple import search_vault, build_rag_context
-        from modules.rag_electron import search_via_electron, get_model_for_tag
+        from modules.rag_electron import search_via_electron, get_model_for_tag, ask_via_electron
+        from modules.slack_utils import extract_slack_files, download_slack_file
 
         cfg = self.cfg
         bot_token  = cfg.get("slack_bot_token", "").strip()
@@ -248,6 +249,9 @@ class SlackBotRunner:
 
         PERSONA_TAG_RE = _re.compile(r"\[([^\]]+)\]")
         BOT_MENTION_RE = _re.compile(r"<@[A-Z0-9]+>")
+        # 스레드/DM별 대화 히스토리 (key: "channel:thread_ts", 최대 키 1000개)
+        _MAX_HISTORY_KEYS = 1000
+        _conv_history: dict[str, list[dict]] = {}
 
         def parse_msg(text: str):
             text = BOT_MENTION_RE.sub("", text).strip()
@@ -258,65 +262,257 @@ class SlackBotRunner:
                 text = text[:m.start()] + text[m.end():]
             return tag, text.strip()
 
-        @app.event("app_mention")
-        def handle_mention(event, say, logger):
-            text      = event.get("text", "")
-            thread_ts = event.get("thread_ts") or event.get("ts")
-            channel   = event["channel"]
+        _VISION_MODEL = "claude-sonnet-4-6"  # 항상 Claude 사용 (GPT/Gemini 설정 무시)
 
+        def _fetch_via_files_info(file_id: str) -> bytes | None:
+            """
+            Enterprise Grid 폴백: files.info API로 썸네일 URL을 받아 다운로드.
+            url_private_download는 SSO에 막히지만 thumb_* URL은 별도 CDN에서 서빙되어
+            봇 토큰 Authorization 헤더로 접근 가능한 경우가 많음.
+            """
+            import requests as _req
+            try:
+                info = web.files_info(file=file_id)
+                if not info.get("ok"):
+                    return None
+                file_obj = info["file"]
+                for key in ("thumb_1024", "thumb_720", "thumb_480", "thumb_360"):
+                    thumb_url = file_obj.get(key)
+                    if not thumb_url:
+                        continue
+                    self._log(f"[Vision] Enterprise thumb 시도: {key}")
+                    r = _req.get(
+                        thumb_url,
+                        headers={"Authorization": f"Bearer {bot_token}"},
+                        allow_redirects=True,
+                        timeout=15,
+                    )
+                    if r.ok and r.content and r.content[:1] != b"<":
+                        self._log(f"[Vision] thumb 다운로드 완료: {len(r.content)}바이트")
+                        return r.content
+            except Exception as e:
+                self._log(f"[Vision] files.info 실패: {e}")
+            return None
+
+        # Anthropic base64 이미지 한도: 5MB base64 ≈ 3.75MB raw → 여유분 포함 3.5MB
+        _MAX_IMG_BYTES = 3_500_000
+
+        def _shrink_image(raw: bytes, mimetype: str, file_id: str | None) -> tuple[bytes, str] | None:
+            """이미지를 Anthropic 허용 범위(≤3.5MB)로 줄임. PIL 리사이즈 → Slack thumb 순 폴백."""
+            # PIL 리사이즈 시도
+            try:
+                from PIL import Image
+                import io as _io
+                img = Image.open(_io.BytesIO(raw))
+                # 장변 1568px 이하로 축소 (Anthropic 권장 최대치)
+                if max(img.size) > 1568:
+                    ratio = 1568 / max(img.size)
+                    img = img.resize((int(img.size[0] * ratio), int(img.size[1] * ratio)), Image.LANCZOS)
+                # 투명도 없으면 JPEG 변환 (용량 절감)
+                if img.mode in ("RGBA", "P", "LA"):
+                    img = img.convert("RGB")
+                buf = _io.BytesIO()
+                img.save(buf, format="JPEG", quality=85, optimize=True)
+                result = buf.getvalue()
+                self._log(f"[Vision] PIL 리사이즈 완료: {len(result)//1024}KB")
+                return result, "image/jpeg"
+            except ImportError:
+                self._log("[Vision] PIL 없음 → Slack thumb 시도")
+            except Exception as e:
+                self._log(f"[Vision] PIL 오류: {e}")
+            # Slack thumb 폴백 (files.info → thumb_1024/720/480)
+            if file_id:
+                thumb = _fetch_via_files_info(file_id)
+                if thumb:
+                    self._log(f"[Vision] Slack thumb 사용: {len(thumb)//1024}KB")
+                    return thumb, "image/jpeg"
+            return None
+
+        def _download_images(image_files: list) -> list[dict]:
+            """이미지 다운로드 → [{"data": base64, "mediaType": str}] 리스트 반환."""
+            import base64 as _b64
+            results = []
+            for f in image_files[:3]:
+                url = f.get("url_private_download") or f.get("url_private")
+                raw = download_slack_file(url or "", bot_token, log_fn=self._log) if url else None
+                file_id = f.get("id")
+                # Enterprise Grid 폴백: SSO 차단 시 files.info → thumb URL 시도
+                if not raw and file_id:
+                    raw = _fetch_via_files_info(file_id)
+                if not raw:
+                    self._log("[Vision] 다운로드 실패")
+                    continue
+                mimetype = f.get("mimetype") or "image/png"
+                # 너무 크면 리사이즈 (Anthropic 5MB base64 한도)
+                if len(raw) > _MAX_IMG_BYTES:
+                    self._log(f"[Vision] {len(raw)//1024}KB 초과 → 리사이즈")
+                    shrunk = _shrink_image(raw, mimetype, file_id)
+                    if not shrunk:
+                        self._log("[Vision] 리사이즈 실패 → 스킵")
+                        continue
+                    raw, mimetype = shrunk
+                self._log(f"[Vision] {len(raw)//1024}KB magic={raw[:4].hex()}")
+                results.append({"data": _b64.standard_b64encode(raw).decode(), "mediaType": mimetype})
+            return results
+
+        def _describe_images(downloaded: list[dict], query: str) -> str | None:
+            """다운로드된 이미지들을 Claude로 묘사 (RAG 쿼리 보강용). 실패 시 None."""
+            if not api_key:
+                return None
+            content_parts: list = [
+                {"type": "image", "source": {"type": "base64", "media_type": img["mediaType"], "data": img["data"]}}
+                for img in downloaded
+            ]
+            desc_prompt = (
+                f"{query}\n\n"
+                "이미지에서 보이는 캐릭터의 외형(복장, 색상, 헤어, 표정, 분위기, 소품 등)을 "
+                "구체적으로 묘사해주세요. 묘사만 출력, 평가나 결론은 제외."
+            )
+            content_parts.append({"type": "text", "text": desc_prompt})
+            try:
+                import anthropic as _ant
+                msg = _ant.Anthropic(api_key=api_key).messages.create(
+                    model=_VISION_MODEL,
+                    max_tokens=800,
+                    system="당신은 게임 캐릭터 아트 분석 전문가입니다. 이미지를 객관적으로 묘사합니다.",
+                    messages=[{"role": "user", "content": content_parts}],
+                )
+                return msg.content[0].text
+            except Exception as e:
+                self._log(f"[Vision] 묘사 오류: {e}")
+                return None
+
+        def respond(text: str, say, channel: str, thread_ts: str | None = None, files: list | None = None):
+            """채널 멘션 / DM 공통 응답 처리."""
             tag, query = parse_msg(text)
-            if not query:
+            image_files = [f for f in (files or []) if f.get("mimetype", "").startswith("image/")]
+
+            if not query and not image_files:
                 say(text="무엇을 도와드릴까요?", thread_ts=thread_ts)
                 return
+            if not query:
+                query = "이 이미지를 분석해주세요."
 
             persona = resolve_persona(tag)
             emoji   = persona.get("emoji", "🤖")
             name    = persona.get("name", tag)
+
+            # thinking 메시지 1개만 생성 — vision/RAG 모두 같은 ts로 업데이트
+            status = "이미지 분석 중..." if image_files else "답변 준비 중..."
+            thinking = say(text=f"{emoji} *{name}* {status}", thread_ts=thread_ts)
+
+            # 이미지가 있으면: 다운로드 → Electron에 직접 전달 (LLM이 이미지 + RAG 문서 함께 분석)
+            images_payload: list[dict] = []
+            if image_files:
+                self._log(f"[Vision] {name}: 이미지 {len(image_files)}개 다운로드 중...")
+                images_payload = _download_images(image_files)
+                if images_payload:
+                    self._log(f"[Vision] {len(images_payload)}개 Electron으로 전달")
+                else:
+                    self._log("[Vision] 이미지 다운로드 0건 → 텍스트만으로 RAG 폴백")
+
             self._log(f"[Slack] {name}: {query[:60]}")
 
-            thinking = say(text=f"{emoji} *{name}* 답변 준비 중...", thread_ts=thread_ts)
+            # 스레드별 히스토리 조회 (DM은 channel을 key로 사용)
+            hist_key = f"{channel}:{thread_ts or 'dm'}"
+            history = _conv_history.get(hist_key, [])
+            if history:
+                self._log(f"[Slack] 히스토리 {len(history)//2}턴 복원")
 
-            # Electron RAG 우선, 미실행 시 단순 키워드 검색 폴백
-            results = search_via_electron(query, top_n=top_n)
-            if results is None:
-                results = search_vault(query, vault_path, top_n=top_n)
-                self._log(f"[RAG] fallback → simple search ({len(results)}건)")
+            # 1순위: Electron /ask — 렘브란트 맵의 BFS RAG + LLM 파이프라인 그대로 사용
+            answer = ask_via_electron(query, tag=tag, history=history, images=images_payload or None)
+            if answer:
+                self._log("[RAG] Electron /ask 성공 (BFS+LLM)")
+                final = f"{emoji} *{name}*\n\n{answer}"
             else:
-                self._log(f"[RAG] Electron TF-IDF ({len(results)}건)")
-            rag_context = build_rag_context(results, max_chars=6000)
+                # 폴백: Python 자체 RAG + Claude 직접 호출
+                self._log("[RAG] Electron 미실행 → fallback")
+                results = search_via_electron(query, top_n=top_n)
+                if results is None:
+                    results = search_vault(query, vault_path, top_n=top_n)
+                    self._log(f"[RAG] simple search ({len(results)}건)")
+                else:
+                    self._log(f"[RAG] Electron TF-IDF ({len(results)}건)")
+                rag_context = build_rag_context(results, max_chars=6000)
 
-            # 페르소나별 모델을 Electron 설정에서 가져옴
-            model  = get_model_for_tag(tag)
-            claude = ClaudeClient(api_key, model) if api_key else None
-            self._log(f"[모델] {model}")
+                model = get_model_for_tag(tag)
+                claude = ClaudeClient(api_key, model) if api_key else None
+                self._log(f"[모델] {model}")
 
-            if claude:
-                system = persona["system"] + (f"\n\n{rag_context}" if rag_context else "")
+                if claude:
+                    system = persona["system"] + (f"\n\n{rag_context}" if rag_context else "")
+                    try:
+                        answer = claude.complete(system, query, max_tokens=1500)
+                    except Exception as e:
+                        answer = f"❌ Claude 오류: {e}"
+                elif rag_context:
+                    answer = f"_(API 키 없음)_\n\n{rag_context}"
+                else:
+                    answer = "관련 문서를 찾지 못했습니다."
+
+                sources = ""
+                if results:
+                    lines = [f"• `{r['stem']}` ({r['date']})" for r in results[:3]]
+                    sources = "\n\n📂 *참고 문서*\n" + "\n".join(lines)
+                final = f"{emoji} *{name}*\n\n{answer}{sources}"
+
+            # 히스토리 업데이트 (최대 20턴 = 40 메시지 보존)
+            _conv_history[hist_key] = (history + [
+                {"role": "user", "content": query},
+                {"role": "assistant", "content": answer or ""},
+            ])[-40:]
+            # 오래된 키 정리 (메모리 누수 방지)
+            if len(_conv_history) > _MAX_HISTORY_KEYS:
+                for old_key in list(_conv_history)[:len(_conv_history) - _MAX_HISTORY_KEYS]:
+                    del _conv_history[old_key]
+
+            ts = (thinking or {}).get("ts")
+            if ts:
                 try:
-                    answer = claude.complete(system, query, max_tokens=1500)
-                except Exception as e:
-                    answer = f"❌ Claude 오류: {e}"
-            elif rag_context:
-                answer = f"_(API 키 없음)_\n\n{rag_context}"
-            else:
-                answer = "관련 문서를 찾지 못했습니다."
+                    web.chat_update(channel=channel, ts=ts, text=final)
+                    return
+                except Exception:
+                    pass
+            say(text=final, thread_ts=thread_ts)
 
-            sources = ""
-            if results:
-                lines = [f"• `{r['stem']}` ({r['date']})" for r in results[:3]]
-                sources = "\n\n📂 *참고 문서*\n" + "\n".join(lines)
+        @app.event("app_mention")
+        def handle_mention(event, say, logger):
+            files = extract_slack_files(event)
+            logger.debug(f"[mention] subtype={event.get('subtype')!r} files={bool(files)} text={event.get('text','')[:40]!r}")
+            respond(
+                text=event.get("text", ""),
+                say=say,
+                channel=event["channel"],
+                thread_ts=event.get("thread_ts") or event.get("ts"),
+                files=files,
+            )
 
-            final = f"{emoji} *{name}*\n\n{answer}{sources}"
-            try:
-                web.chat_update(channel=channel, ts=thinking["ts"], text=final)
-            except Exception:
-                say(text=final, thread_ts=thread_ts)
+        @app.event("message")
+        def handle_dm(event, say, logger):
+            # DM(im 채널)만 처리, 봇 자신의 메시지 제외
+            if event.get("channel_type") != "im":
+                return
+            subtype = event.get("subtype")
+            if event.get("bot_id") or (subtype and subtype != "file_share"):
+                return
+            files = extract_slack_files(event)
+            logger.debug(f"[dm] subtype={subtype!r} files={bool(files)} text={event.get('text','')[:40]!r}")
+            respond(
+                text=event.get("text", ""),
+                say=say,
+                channel=event["channel"],
+                thread_ts=None,  # DM은 스레드 없이 바로 답변
+                files=files,
+            )
 
         self._handler = SocketModeHandler(app, app_token)
 
         def _run():
             try:
-                self._handler.start()
+                self._handler.connect()   # signal 등록 없이 WebSocket만 연결 (비-메인 스레드 호환)
+                import time
+                while self._handler.client and self._handler.client.is_connected():
+                    time.sleep(1)
             except Exception as e:
                 self._log(f"❌ Slack 봇 종료: {e}")
             finally:
@@ -324,7 +520,7 @@ class SlackBotRunner:
 
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
-        self._log(f"🟢 Slack 봇 시작 — 모델: {model}")
+        self._log("🟢 Slack 봇 시작 — 모델: 렘브란트 맵 페르소나 설정 따름")
         return True
 
     def stop(self):

@@ -308,6 +308,23 @@ export async function fetchRAGContext(
     // ── Stage 1: 직접 문자열 검색 (우선 시도) ─────────────────────────────────
     // 공백 분리 + 숫자 추출로 날짜형 파일명("[2026.01.28]") 매칭 보장
     const directHits = directVaultSearch(userMessage, 8)
+
+    // 최신 문서 우선 재정렬: 키워드 점수가 비슷할 때 최신 문서가 상위에 오도록
+    // 180일 반감기 recency boost (최대 +0.25) — 2020년 문서는 사실상 0
+    {
+      const _rdocs = useVaultStore.getState().loadedDocuments
+      const _rdocMap = new Map(_rdocs?.map(d => [d.id, d]) ?? [])
+      const _rnow = Date.now()
+      const HALF_LIFE_MS = 180 * 24 * 60 * 60 * 1000
+      const recBoost = (docId: string) => {
+        const d = _rdocMap.get(docId)
+        if (!d) return 0
+        const ms = d.mtime ?? (d.date ? Date.parse(d.date) : NaN)
+        return isNaN(ms) ? 0 : 0.25 * Math.exp(-(_rnow - ms) / HALF_LIFE_MS)
+      }
+      directHits.sort((a, b) => (b.score + recBoost(b.doc_id)) - (a.score + recBoost(a.doc_id)))
+    }
+
     // 파일명 매칭(score 2x)이 있으면 "명시적 문서 지목" 쿼리로 판단 (raw score >= 2 → 정규화 0.2)
     const hasStrongDirectHit = directHits.some(r => r.score >= 0.2)
 
@@ -445,6 +462,99 @@ export async function fetchRAGContext(
  * @param onChunk      Called with each streamed text delta
  * @param attachments  Optional files attached to the current message
  */
+
+/**
+ * Slack 봇용: 렘브란트 맵의 RAG 파이프라인(BFS+TF-IDF)으로 컨텍스트를 수집하고
+ * 지정 페르소나 모델로 답변을 생성해 반환한다.
+ * useRagApi.ts의 onAsk 핸들러에서 호출됨.
+ */
+export async function generateSlackAnswer(
+  query: string,
+  directorId: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+  images?: { data: string; mediaType: string }[],
+): Promise<string> {
+  const {
+    personaModels, projectInfo, directorBios, customPersonas,
+    personaPromptOverrides, responseInstructions, ragInstruction,
+    personaDocumentIds,
+  } = useSettingsStore.getState()
+
+  // streamMessage와 동일: 커스텀 페르소나 우선 확인
+  const customPersona = customPersonas.find(p => p.id === directorId)
+  const modelId = customPersona
+    ? customPersona.modelId
+    : (personaModels[directorId as DirectorId] ?? personaModels['chief_director'])
+  const provider = getProviderForModel(modelId)
+  if (!provider) return ''
+  const apiKey = getApiKey(provider)
+  if (!apiKey) return ''
+
+  // ── 시스템 프롬프트 구성 (streamMessage와 동일 순서) ─────────────────────
+  const basePrompt = customPersona
+    ? customPersona.systemPrompt
+    : (personaPromptOverrides[directorId as DirectorId]
+        ?? PERSONA_PROMPTS[directorId as DirectorId]
+        ?? PERSONA_PROMPTS['chief_director'])
+
+  const directorBio = customPersona ? undefined : directorBios[directorId as DirectorId]
+  const projectContext = buildProjectContext(projectInfo, directorBio)
+
+  // 페르소나 문서 주입
+  const personaDocId = personaDocumentIds[directorId]
+  let personaDocContext = ''
+  if (personaDocId) {
+    const doc = useVaultStore.getState().loadedDocuments?.find(d => d.id === personaDocId)
+    if (doc) {
+      personaDocContext = `\n\n---\n아래는 "${doc.filename}" 문서에서 가져온 페르소나 참고 자료입니다. 이 내용을 바탕으로 해당 인물의 관점과 어투를 참고하세요:\n\n${doc.rawContent.slice(0, 4000)}`
+    }
+  }
+
+  // 장기 기억 주입
+  const { memoryText } = useMemoryStore.getState()
+  const memoryContext = memoryText.trim()
+    ? `\n\n---\n## 📌 이전 대화 기억\n${memoryText.trim()}\n---`
+    : ''
+
+  const ragInstructionBlock = ragInstruction.trim() ? '\n\n' + ragInstruction.trim() : ''
+  const systemPrompt = projectContext + basePrompt + ragInstructionBlock + personaDocContext + memoryContext
+    + (responseInstructions.trim() ? '\n\n' + responseInstructions.trim() : '')
+
+  // ── RAG context → 유저 메시지 앞에 주입 (streamMessage와 동일) ─────────────
+  const ragContext = await fetchRAGContext(query, directorId)
+  let fullUserMessage = query
+  if (ragContext) {
+    fullUserMessage = `${ragContext}위 문서들은 볼트의 WikiLink 그래프를 탐색해 수집한 관련 자료입니다.\n답변 시 이 자료들을 참고하여 인사이트와 구체적인 피드백을 제공하세요.\n\n---\n\n${query}`
+  }
+
+  // 이전 대화 히스토리 (최대 20개 메시지 = 10턴)
+  const historyMessages = history.slice(-20).map(m => ({
+    role: m.role,
+    content: sanitize(m.content),
+  }))
+
+  // 이미지 첨부 시 Attachment 배열로 변환 (providers가 공통으로 사용하는 형식)
+  const attachments: import('@/types').Attachment[] = (images ?? []).map((img, i) => ({
+    id: `slack-img-${i}`,
+    name: `image${i}.${img.mediaType.split('/')[1] ?? 'png'}`,
+    type: 'image' as const,
+    mimeType: img.mediaType,
+    dataUrl: `data:${img.mediaType};base64,${img.data}`,
+    size: 0,
+  }))
+
+  let answer = ''
+  const { streamCompletion } = await importProvider(provider)
+  await streamCompletion(
+    apiKey, modelId,
+    sanitize(systemPrompt),
+    [...historyMessages, { role: 'user' as const, content: sanitize(fullUserMessage) }],
+    (c: string) => { answer += c },
+    attachments,
+  )
+  return answer
+}
+
 export async function streamMessage(
   persona: SpeakerId,
   userMessage: string,

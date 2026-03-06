@@ -9,6 +9,7 @@ import { useVaultStore } from '@/stores/vaultStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { tfidfIndex } from '@/lib/graphAnalysis'
 import { directVaultSearch } from '@/lib/graphRAG'
+import { generateSlackAnswer } from '@/services/llmClient'
 import type { RagDocResult } from '@/vite-env'
 
 export function useRagApi() {
@@ -74,6 +75,17 @@ export function useRagApi() {
       window.ragAPI!.sendResult(requestId, { personaModels })
     })
 
-    return () => { cleanup(); cleanupSettings() }
+    // Handle full answer generation (Slack /ask endpoint)
+    const cleanupAsk = window.ragAPI.onAsk(async ({ requestId, query, directorId, history, images }) => {
+      try {
+        const answer = await generateSlackAnswer(query, directorId, history ?? [], images)
+        window.ragAPI!.sendResult(requestId, { answer })
+      } catch (err) {
+        console.error('[useRagApi] ask error:', err)
+        window.ragAPI!.sendResult(requestId, { answer: '' })
+      }
+    })
+
+    return () => { cleanup(); cleanupSettings(); cleanupAsk() }
   }, [])
 }
