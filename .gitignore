@@ -10,6 +10,9 @@ dist-electron/
 .env.local
 .env.*.local
 
+# Bot config contains API keys/tokens — use config.example.json as template
+bot/config.json
+
 # Electron build artifacts
 release/
 

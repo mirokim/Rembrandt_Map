@@ -195,9 +195,8 @@ export default function Graph3D({ width, height }: Props) {
     sceneRef.current = scene
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 1, 5000)
-    // Start farther back for large graphs so all nodes are visible initially
-    const camZ = Math.max(600, Math.sqrt(nodes.length) * 55)
-    camera.position.set(0, 0, camZ)
+    // Initial position: moderately close — fitCameraToNodes() will adjust after simulation settles
+    camera.position.set(0, 0, Math.max(300, Math.sqrt(nodes.length) * 30))
     cameraRef.current = camera
 
     // OrbitControls
@@ -218,10 +217,32 @@ export default function Graph3D({ width, height }: Props) {
     controls.addEventListener('end', onInteractEnd)
     controlsRef.current = controls
 
-    // Register camera reset callback for PhysicsControls
-    graphCallbacks.resetCamera = () => {
-      controls.reset()
+    // Fit camera so all nodes are visible — called after simulation settles and on reset
+    const fitCameraToNodes = () => {
+      const meshes = Array.from(nodeMeshesRef.current.values())
+      if (meshes.length === 0) return
+      let minX = Infinity, maxX = -Infinity
+      let minY = Infinity, maxY = -Infinity
+      let minZ = Infinity, maxZ = -Infinity
+      meshes.forEach(m => {
+        minX = Math.min(minX, m.position.x); maxX = Math.max(maxX, m.position.x)
+        minY = Math.min(minY, m.position.y); maxY = Math.max(maxY, m.position.y)
+        minZ = Math.min(minZ, m.position.z); maxZ = Math.max(maxZ, m.position.z)
+      })
+      const cx = (minX + maxX) / 2
+      const cy = (minY + maxY) / 2
+      const cz = (minZ + maxZ) / 2
+      const spread = Math.max(maxX - minX, maxY - minY, maxZ - minZ)
+      const fovRad = (camera.fov * Math.PI) / 180
+      // distance to fit spread in FOV with 20% padding
+      const dist = Math.max(150, (spread * 0.6) / Math.tan(fovRad / 2))
+      controls.target.set(cx, cy, cz)
+      camera.position.set(cx, cy, cz + dist)
+      controls.update()
     }
+
+    // Register camera reset callback for PhysicsControls
+    graphCallbacks.resetCamera = fitCameraToNodes
 
     // ── Degree map for Obsidian-style node sizing ─────────────────────────
     const degMap = new Map<string, number>()
@@ -395,8 +416,12 @@ export default function Graph3D({ width, height }: Props) {
     // setNodes() resets this to false; we restore it once the scene is ready to render.
     setGraphLayoutReady(true)
 
+    // Auto-fit after simulation has had time to spread nodes (d3 mostly settles in ~1.5s)
+    const autoFitTimer = setTimeout(fitCameraToNodes, 1500)
+
     return () => {
       graphCallbacks.resetCamera = null
+      clearTimeout(autoFitTimer)
       cancelAnimationFrame(rafRef.current)
       prevHoverStateRef.current = null
       controls.removeEventListener('start', onInteractStart)
